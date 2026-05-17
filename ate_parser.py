@@ -410,69 +410,16 @@ class ATEParser:
         rounds = []
 
         for f in files:
-            data, rows, cols = self._read_csv(f)
-
-            # 找Test Name行
-            test_name_row = None
-            for r in range(min(5, rows)):
-                first_val = data.get((r, 0), '').lower()
-                row1_val = data.get((r, 1), '').lower()
-                if 'test name' in first_val or 'test name' in row1_val:
-                    test_name_row = r
-                    break
-            if test_name_row is None:
+            struct = self._parse_csv_structure(f)
+            if 'error' in struct:
                 continue
-
-            # 提取测试项定义 + 收集 chip_id 候选列
-            test_items = []
-            chip_id_candidates = []
-            for c in range(1, cols):
-                name = data.get((test_name_row, c), '')
-                if not name or name == 'nan':
-                    continue
-                name_clean = name.replace('[', '.').replace(']', '').replace('.signalGroup', '')
-                parts = name_clean.split('.')
-                if parts and parts[0] == 'Main':
-                    parts = parts[1:]
-                noise_tokens = ('Collection', 'funcTestDescriptor', 'Read_LBID', 'Read_deviceID', 'ptdGroup')
-                filtered = [p for p in parts if p not in noise_tokens]
-                if filtered and filtered[-1] in ('ptd', 'ftd'):
-                    filtered = filtered[:-1]
-                short = '.'.join(filtered) if filtered else ('.'.join(parts[-3:]) if len(parts) >= 3 else name_clean[-80:])
-                test_num = data.get((test_name_row + 1, c), '')
-                if test_num and test_num != 'nan':
-                    short = f"{short}[#{test_num}]"
-                test_items.append({
-                    'short_name': short[:80],
-                    'low': data.get((test_name_row + 2, c), ''),
-                    'high': data.get((test_name_row + 3, c), ''),
-                    'col': c
-                })
-
-                name_lower = name.lower()
-                if 'chip_id' in name_lower and 'flag' not in name_lower and 'bitmap' not in name_lower:
-                    chip_id_candidates.append(c)
-
-            # 找数据头行
-            data_head_row = test_name_row + 5
-            while data_head_row < rows:
-                v = data.get((data_head_row, 0), '').lower()
-                if v in ['id', 'lid', 'filename', 'starttime', 'lot_id', '']:
-                    break
-                data_head_row += 1
-
-            if not chip_id_candidates:
-                continue
-            chip_id_col = self._find_chip_id_col(data, rows, test_name_row, data_head_row)
-            if chip_id_col is None:
-                continue
-
-            # 解析元信息列头
-            meta_cols = {}
-            for c in range(min(15, cols)):
-                h = data.get((data_head_row, c), '')
-                if h and h != 'nan':
-                    meta_cols[c] = h
+            data = struct['data']
+            rows = struct['rows']
+            cols = struct['cols']
+            test_items = struct['test_items']
+            chip_id_col = struct['chip_id_col']
+            data_head_row = struct['data_head_row']
+            meta_cols = struct['meta_cols']
 
             # 通过 chip_id 测试项列查找目标芯片（取最后一次测量）
             last_match = None
@@ -483,11 +430,7 @@ class ATEParser:
                     continue
 
                 chip_id_val_raw = data.get((r, chip_id_col), '')
-                try:
-                    cid_int = int(float(chip_id_val_raw))
-                    effective_id = str(cid_int) if cid_int > 0 else chip_id_str
-                except (ValueError, TypeError):
-                    effective_id = chip_id_str
+                effective_id, _ = self._extract_chip_id(chip_id_val_raw)
 
                 if str(effective_id) != chip_id_str:
                     continue
