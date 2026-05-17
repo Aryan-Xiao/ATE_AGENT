@@ -615,8 +615,8 @@ class ATEParser:
         chip_round_results = {}  # {chip_id: [{round, pass_fail, fail_count}]}
 
         for f in files:
-            r = self.parse_test_data(f)
-            if 'error' in r:
+            struct = self._parse_csv_structure(f)
+            if 'error' in struct:
                 continue
 
             # 从文件名提取轮次
@@ -625,88 +625,24 @@ class ATEParser:
             round_info = file_meta['round'] or '?'
             round_index = file_meta['round_index']
 
-            # 重新解析获取每个芯片的chip_id和fail详情
-            data, rows, cols = self._read_csv(f)
-
-            test_name_row = None
-            for rr in range(min(5, rows)):
-                first_val = data.get((rr, 0), '').lower()
-                row1_val = data.get((rr, 1), '').lower()
-                if 'test name' in first_val or 'test name' in row1_val:
-                    test_name_row = rr
-                    break
-            if test_name_row is None:
-                continue
-
-            test_items = []
-            chip_id_candidates = []
-            for c in range(1, cols):
-                name = data.get((test_name_row, c), '')
-                if not name or name == 'nan':
-                    continue
-                name_clean = name.replace('[', '.').replace(']', '').replace('.signalGroup', '')
-                name_parts = name_clean.split('.')
-                if name_parts and name_parts[0] == 'Main':
-                    name_parts = name_parts[1:]
-                noise_tokens = ('Collection', 'funcTestDescriptor', 'Read_LBID', 'Read_deviceID', 'ptdGroup')
-                filtered = [p for p in name_parts if p not in noise_tokens]
-                if filtered and filtered[-1] in ('ptd', 'ftd'):
-                    filtered = filtered[:-1]
-                short = '.'.join(filtered) if filtered else ('.'.join(name_parts[-3:]) if len(name_parts) >= 3 else name_clean[-80:])
-                test_num = data.get((test_name_row + 1, c), '')
-                if test_num and test_num != 'nan':
-                    short = f"{short}[#{test_num}]"
-                test_items.append({
-                    'short_name': short[:80],
-                    'low': data.get((test_name_row + 2, c), ''),
-                    'high': data.get((test_name_row + 3, c), ''),
-                    'col': c
-                })
-
-                name_lower = name.lower()
-                if 'chip_id' in name_lower and 'flag' not in name_lower and 'bitmap' not in name_lower:
-                    chip_id_candidates.append(c)
-
-            data_head_row = test_name_row + 5
-            while data_head_row < rows:
-                v = data.get((data_head_row, 0), '').lower()
-                if v in ['id', 'lid', 'filename', 'starttime', 'lot_id', '']:
-                    break
-                data_head_row += 1
-
-            if not chip_id_candidates:
-                continue
-            chip_id_col = self._find_chip_id_col(data, rows, test_name_row, data_head_row)
-            if chip_id_col is None:
-                continue
-
-            meta_cols = {}
-            for c in range(min(15, cols)):
-                h = data.get((data_head_row, c), '')
-                if h and h != 'nan':
-                    meta_cols[c] = h
+            data = struct['data']
+            rows = struct['rows']
+            cols = struct['cols']
+            test_items = struct['test_items']
+            chip_id_col = struct['chip_id_col']
+            data_head_row = struct['data_head_row']
+            meta_cols = struct['meta_cols']
 
             for rr in range(data_head_row + 1, rows):
                 vals = [data.get((rr, c), '') for c in range(min(8, cols))]
                 if all(v == '' or v == 'nan' for v in vals):
                     continue
 
-                chip_id = data.get((rr, chip_id_col), '?')
-                try:
-                    cid_int = int(float(chip_id))
-                    if cid_int > 0:
-                        chip_id = str(cid_int)
-                    else:
-                        # ID 读取失败，用 PART_ID 做回退（但无法跨文件追踪）
-                        part_id_val = data.get((rr, 6), '')  # PART_ID 通常在 col 6
-                        chip_id = f'PART_{part_id_val}@{f}' if part_id_val else None
-                        if chip_id is None:
-                            continue
-                except (ValueError, TypeError):
-                    part_id_val = data.get((rr, 6), '')
-                    chip_id = f'PART_{part_id_val}@{f}' if part_id_val else None
-                    if chip_id is None:
-                        continue
+                chip_id_raw = data.get((rr, chip_id_col), '')
+                part_id_val = next((data.get((rr, c), '') for c, h in meta_cols.items() if h == 'PART_ID'), '')
+                chip_id, unreadable = self._extract_chip_id(chip_id_raw, part_id_val, f)
+                if unreadable and not part_id_val:
+                    continue
 
                 part_flg = ''
                 for c, h in meta_cols.items():
