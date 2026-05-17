@@ -255,6 +255,9 @@ class ATEParser:
                 break
             data_head_row += 1
 
+        if data_head_row >= rows:
+            return {'error': '找不到数据头行'}
+
         # 选最优 chip_id 列
         chip_id_col = self._find_chip_id_col(data, rows, test_name_row, data_head_row)
         if chip_id_col is None:
@@ -279,129 +282,44 @@ class ATEParser:
         }
 
     def parse_test_data(self, filename):
-        data, rows, cols = self._read_csv(filename)
-        
-        # 找 Test Name 行
-        test_name_row = None
-        for r in range(min(5, rows)):
-            first_val = data.get((r, 0), '').lower()
-            row1_val = data.get((r, 1), '').lower()
-            if 'test name' in first_val or 'test name' in row1_val:
-                test_name_row = r
-                break
-        
-        if test_name_row is None:
-            return {'error': '找不到Test Name行'}
-        
-        # 提取测试项
-        test_items = []
-        chip_id_candidates = []
-        for c in range(1, cols):
-            name = data.get((test_name_row, c), '')
-            if not name or name == 'nan':
-                continue
+        struct = self._parse_csv_structure(filename)
+        if 'error' in struct:
+            return struct
 
-            # 生成可区分的短名称：去掉共享前缀和噪声词，保留区分性内容
-            # Main.OS.PowerShort.Collection[VDD08].ptd → OS.PowerShort.VDD08
-            # Main.ANALOG.Dump_Datalog.ptdGroup.ptd_done_bitmap_rf_fl → ANALOG.Dump_Datalog.ptd_done_bitmap_rf_fl
-            # Main.ANALOG.RF_Test.TX_DC1_IQM_TRIM.ptd_tx_dci_cd → ANALOG.RF_Test.TX_DC1_IQM_TRIM.ptd_tx_dci_cd
-            # Main.IO.VOH.Collection[GPIO00].ptd → IO.VOH.GPIO00
-            # Main.DFT.MBIST.funcTestDescriptor → DFT.MBIST
-            name_clean = name.replace('[', '.').replace(']', '').replace('.signalGroup', '')
-            parts = name_clean.split('.')
-            # 去掉前面的 Main.
-            if parts and parts[0] == 'Main':
-                parts = parts[1:]
-            # 去掉无意义中间词
-            noise_tokens = ('Collection', 'funcTestDescriptor', 'Read_LBID', 'Read_deviceID', 'ptdGroup')
-            filtered = [p for p in parts if p not in noise_tokens]
-            # 去掉尾部的无意义后缀 ptd / ftd（单独出现的，不是 ptd_xxx 这种有内容的）
-            if filtered and filtered[-1] in ('ptd', 'ftd'):
-                filtered = filtered[:-1]
-            if filtered:
-                short = '.'.join(filtered)
-            elif len(parts) >= 3:
-                short = '.'.join(parts[-3:])
-            else:
-                short = name_clean[-80:]
-            # 用测试项编号去重：同短名项追加编号
-            test_num = data.get((test_name_row + 1, c), '')
-            if test_num and test_num != 'nan':
-                short = f"{short}[#{test_num}]"
+        data = struct['data']
+        rows = struct['rows']
+        cols = struct['cols']
+        test_items = struct['test_items']
+        chip_id_col = struct['chip_id_col']
+        data_head_row = struct['data_head_row']
+        meta_cols = struct['meta_cols']
 
-            test_items.append({
-                'full_name': name[:120],
-                'short_name': short[:80],
-                'number': data.get((test_name_row + 1, c), ''),
-                'low': data.get((test_name_row + 2, c), ''),
-                'high': data.get((test_name_row + 3, c), ''),
-                'unit': data.get((test_name_row + 4, c), ''),
-                'col': c
-            })
-
-            # 收集所有含 chip_id 的列（排除 flag/bitmap），稍后选唯一值最多的
-            name_lower = name.lower()
-            if 'chip_id' in name_lower and 'flag' not in name_lower and 'bitmap' not in name_lower:
-                chip_id_candidates.append(c)
-
-        # 找数据头行（chip_id 选择需要先知道 data_head_row）
-        data_head_row = test_name_row + 5
-        while data_head_row < rows:
-            # 看第一个值是否可能是数据头
-            v = data.get((data_head_row, 0), '').lower()
-            if v in ['id', 'lid', 'filename', 'starttime', 'lot_id', '']:
-                break
-            data_head_row += 1
-
-        # 选择唯一值最多的 chip_id 列
-        if not chip_id_candidates:
-            return {'error': '找不到chip_id测试项（模糊匹配含chip_id且不含flag/bitmap的列）'}
-        chip_id_col = self._find_chip_id_col(data, rows, test_name_row, data_head_row)
-        if chip_id_col is None:
-            return {'error': '找不到有效的chip_id列（所有chip_id列值都相同或为0）'}
-        
-        # 解析元信息列
-        meta_cols = {}
-        for c in range(min(15, cols)):
-            h = data.get((data_head_row, c), '')
-            if h and h != 'nan':
-                meta_cols[c] = h
-        
         # 解析芯片
         chips = []
         for r in range(data_head_row + 1, rows):
             vals = [data.get((r, c), '') for c in range(min(8, cols))]
             if all(v == '' or v == 'nan' for v in vals):
                 continue
-            
+
             chip = {'test_values': {}}
             for c, header in meta_cols.items():
                 val = data.get((r, c), '')
                 if val and val != 'nan':
                     chip[header] = val
-            
+
             for item in test_items:
                 val = data.get((r, item['col']), '')
                 if val and val != 'nan':
                     try:
                         chip['test_values'][item['short_name']] = float(val)
-                    except:
+                    except (ValueError, TypeError):
                         chip['test_values'][item['short_name']] = val
 
-            # 从 chip_id 测试项列提取芯片唯一标识
-            chip_id_val = data.get((r, chip_id_col), '')
-            try:
-                cid_int = int(float(chip_id_val))
-                if cid_int > 0:
-                    chip['chip_id'] = str(cid_int)
-                else:
-                    # chip_id=0 或负值：ID 读取失败，回退到 PART_ID + 文件名
-                    part_id = chip.get('PART_ID', '')
-                    chip['chip_id'] = f'PART_{part_id}@{filename}' if part_id else '?'
-                    chip['chip_id_unreadable'] = True
-            except (ValueError, TypeError):
-                part_id = chip.get('PART_ID', '')
-                chip['chip_id'] = f'PART_{part_id}@{filename}' if part_id else '?'
+            part_id = chip.get('PART_ID', '')
+            chip_id_raw = data.get((r, chip_id_col), '')
+            chip_id_str, unreadable = self._extract_chip_id(chip_id_raw, part_id, filename)
+            chip['chip_id'] = chip_id_str
+            if unreadable:
                 chip['chip_id_unreadable'] = True
 
             chips.append(chip)
