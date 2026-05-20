@@ -144,15 +144,15 @@ class ATEParser:
                     # ALL_IN/PASS/FAIL
                     if c2 == 'ALL_IN':
                         try: total = int(float(cnt_val))
-                        except: pass
+                        except (ValueError, TypeError): pass
                         continue
                     elif c2 == 'PASS':
                         try: pass_cnt = int(float(cnt_val))
-                        except: pass
+                        except (ValueError, TypeError): pass
                         continue
                     elif c2 == 'FAIL':
                         try: fail_cnt = int(float(cnt_val))
-                        except: pass
+                        except (ValueError, TypeError): pass
                         continue
 
                     if in_detail:
@@ -160,7 +160,7 @@ class ATEParser:
                             continue
                         try:
                             cnt = int(float(cnt_val))
-                        except:
+                        except (ValueError, TypeError):
                             cnt = 0
                         if cnt > 0:
                             result = c3.upper() if c3 else ('PASS' if c1 == '1' else 'FAIL')
@@ -356,7 +356,7 @@ class ATEParser:
             try:
                 low = float(item['low'])
                 high = float(item['high'])
-            except:
+            except (ValueError, TypeError):
                 continue
             
             fail_chips = []

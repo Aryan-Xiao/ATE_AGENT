@@ -230,18 +230,39 @@ def parse_action(response_text):
     return tool_name, {}
 
 
-def run_agent(user_request, max_steps=15):
-    """运行ReAct Agent循环"""
+def run_agent(user_request, max_steps=15, messages=None, state=None):
+    """运行ReAct Agent循环
 
-    called_tools = set()
-    analyzed_files = set()
-    all_data_files = []
+    支持多轮对话：首次调用不传 messages 和 state；
+    返回值中包含它们，传入后续调用即可追问。
 
-    messages = [
-        {'role': 'system', 'content': SYSTEM_PROMPT},
-        {'role': 'user', 'content': f"用户请求：{user_request}\n\n请开始分析。一步步思考和调用工具。完成分析后输出 [最终报告]。"}
-    ]
+    Args:
+        user_request: 用户请求
+        max_steps: 本次最大思考步数
+        messages: 已有对话历史（多轮对话时传入）
+        state: 已有状态 dict，含 called_tools/analyzed_files/all_data_files
 
+    Returns:
+        (report, full_log, messages, state)
+    """
+    called_tools = state.get('called_tools', set()) if state else set()
+    analyzed_files = state.get('analyzed_files', set()) if state else set()
+    all_data_files = state.get('all_data_files', []) if state else []
+    is_followup = messages is not None
+
+    if messages is None:
+        messages = [
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': f"用户请求：{user_request}\n\n请开始分析。一步步思考和调用工具。完成分析后输出 [最终报告]。"}
+        ]
+    else:
+        messages.append({'role': 'user', 'content': f"用户追问：{user_request}\n\n你可以基于已有分析数据直接回答，也可以调用工具获取更多信息。完成回答后输出 [最终报告]。"})
+
+    state = {
+        'called_tools': called_tools,
+        'analyzed_files': analyzed_files,
+        'all_data_files': all_data_files,
+    }
     full_log = []
 
     for step in range(max_steps):
@@ -252,6 +273,14 @@ def run_agent(user_request, max_steps=15):
         print(f"[Step {step+1}/{max_steps}] LLM 响应 ({len(response)} 字符)")
 
         if '[最终报告]' in response:
+            # 追问模式：跳过质量门控，直接输出
+            if is_followup:
+                report_start = response.index('[最终报告]')
+                report = response[report_start + len('[最终报告]'):].strip()
+                messages.append({'role': 'assistant', 'content': response})
+                return report, full_log, messages, state
+
+            # 首次分析：走质量门控
             missing = []
             if 'get_summary_stats' not in called_tools:
                 missing.append("还没有获取整体良率汇总(get_summary_stats)")
@@ -282,10 +311,16 @@ def run_agent(user_request, max_steps=15):
 
             report_start = response.index('[最终报告]')
             report = response[report_start + len('[最终报告]'):].strip()
-            return report, full_log
+            messages.append({'role': 'assistant', 'content': response})
+            return report, full_log, messages, state
 
         tool_name, params = parse_action(response)
         if tool_name is None:
+            # 追问模式下，LLM 给出实质性回答但没调工具也没标记报告，直接返回
+            if is_followup and len(response.strip()) > 50:
+                messages.append({'role': 'assistant', 'content': response})
+                return response.strip(), full_log, messages, state
+
             messages.append({'role': 'assistant', 'content': response})
             messages.append({'role': 'user', 'content': '请继续分析。如需调工具，请用 [工具: 工具名] 格式。如已有足够信息，请输出 [最终报告]。'})
             continue
@@ -331,6 +366,11 @@ def run_agent(user_request, max_steps=15):
 
         full_log.append(f"[观察] {tool_name} 返回: {observation[:600]}")
 
+        # 同步 state
+        state['called_tools'] = called_tools
+        state['analyzed_files'] = analyzed_files
+        state['all_data_files'] = all_data_files
+
         messages.append({'role': 'assistant', 'content': response})
         messages.append({'role': 'user', 'content': f"工具 {tool_name} 返回结果:\n{observation}"})
 
@@ -349,11 +389,12 @@ def run_agent(user_request, max_steps=15):
 
     response = llm.chat(messages + [{'role': 'user', 'content': final_prompt}])
     full_log.append(f"\n--- Final ---\n{response}")
+    messages.append({'role': 'assistant', 'content': response})
 
     if '[最终报告]' in response:
         report_start = response.index('[最终报告]')
-        return response[report_start + len('[最终报告]'):].strip(), full_log
-    return response, full_log
+        return response[report_start + len('[最终报告]'):].strip(), full_log, messages, state
+    return response, full_log, messages, state
 
 
 if __name__ == "__main__":
@@ -368,15 +409,21 @@ if __name__ == "__main__":
 
     if args.interactive:
         print("=" * 60)
-        print("ATE数据分析Agent (ReAct循环)")
+        print("ATE数据分析Agent (ReAct循环) — 多轮对话模式")
         print("支持跨轮次追踪和持续fail分析")
         print("=" * 60)
-        print("输入分析请求（输入 quit 退出）")
+        print("输入分析请求（输入 quit 退出，new 开始新对话）")
         print("示例：分析当前批次的ATE数据")
         print("示例：对比所有QC和FT轮次的数据")
         print("示例：找出多轮持续fail的芯片")
         print("示例：追踪芯片chip_id=11292在各轮次的表现")
         print("-" * 60)
+
+        messages = None
+        state = None
+        turn_count = 0
+
+        print("\n请输入分析请求开始分析(默认自动分析文件)：")
 
         while True:
             try:
@@ -384,14 +431,34 @@ if __name__ == "__main__":
                 if user_input.lower() in ('quit', 'exit', 'q'):
                     break
                 if not user_input:
+                    if messages is None:
+                        # 首次直接回车，用默认请求启动分析
+                        user_input = "分析当前批次的ATE测试数据，重点关注fail芯片，输出诊断报告"
+                        print(f"[系统] 使用默认请求：{user_input}")
+                    else:
+                        continue
+                if user_input.lower() == 'new':
+                    messages = None
+                    state = None
+                    turn_count = 0
+                    print("[系统] 已重置对话，请输入新的分析请求：")
                     continue
 
-                print("\n[Agent] 正在分析...\n")
-                report, log = run_agent(user_input, args.max_steps)
+                if messages is not None:
+                    print("\n[Agent] 基于已有分析，回答追问...\n")
+                else:
+                    print("\n[Agent] 正在分析...\n")
+
+                report, log, messages, state = run_agent(user_input, args.max_steps, messages, state)
+                turn_count += 1
                 print("\n" + "=" * 60)
                 print("[最终报告]")
                 print(report)
                 print("=" * 60)
+                if turn_count == 1:
+                    print('\n[提示] 你可以继续追问（如"芯片#11531为什么fail？"），输入 new 开始新分析，输入 quit 退出')
+                else:
+                    print("\n[提示] 继续追问，或输入 new / quit")
 
             except KeyboardInterrupt:
                 print("\n\n已中断")
@@ -402,7 +469,7 @@ if __name__ == "__main__":
         print(f"[Agent] 请求: {request}")
         print("[Agent] 开始ReAct循环分析...\n")
 
-        report, log = run_agent(request, args.max_steps)
+        report, log, _, _ = run_agent(request, args.max_steps)
 
         print("\n" + "=" * 60)
         print("[最终报告]")
