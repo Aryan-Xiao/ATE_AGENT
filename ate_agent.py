@@ -44,6 +44,7 @@ class LLM:
                 content = content.encode('utf-8', errors='replace').decode('utf-8')
             cleaned.append({'role': m['role'], 'content': content})
         try:
+            # 只保留累计概率达到 top_p 的候选词
             r = self.client.chat.completions.create(
                 model=self.model, messages=cleaned,
                 temperature=0.1, top_p=0.9
@@ -64,7 +65,8 @@ from ate_agent_tools import (
     AnalyzeFailItems,
     CompareFiles,
     FindPersistentFails,
-    TrackChipAcrossRounds
+    TrackChipAcrossRounds,
+    GenerateCharts
 )
 
 tools = {
@@ -74,6 +76,7 @@ tools = {
     "compare_files": CompareFiles(),
     "find_persistent_fails": FindPersistentFails(),
     "track_chip_across_rounds": TrackChipAcrossRounds(),
+    "generate_charts": GenerateCharts(),
 }
 
 TOOL_DESCRIPTIONS = """
@@ -108,6 +111,11 @@ TOOL_DESCRIPTIONS = """
    描述: 追踪单颗芯片在所有轮次中的测试表现，查看它从FT→QC各轮次的pass/fail变化
    参数: chip_id (字符串，芯片的硅ID，如"11292")
    返回: 该芯片在各轮次的测试结果、fail项列表、是否有持续fail项
+
+7. generate_charts
+   描述: 生成分析图表（Fail项柱状图、良率饼图、良率趋势折线图），保存为PNG
+   参数: 无
+   返回: 图表文件路径列表，在报告中用 ![描述](路径) 引用
 """
 
 SYSTEM_PROMPT = f"""你是ATE（自动测试设备）芯片测试分析专家。你是一个通过ReAct循环工作的AI Agent。
@@ -123,26 +131,47 @@ SYSTEM_PROMPT = f"""你是ATE（自动测试设备）芯片测试分析专家。
 {TOOL_DESCRIPTIONS}
 
 ⚠️ 关键领域知识 — 必须理解：
-这批数据是同一批215颗WQ7037AXB芯片的多次轮流测试：
-- FT_R0: 出厂测试第0轮（初测）
-- QC_R0: 质量确认第0轮
-- QC_R1: 质量确认第1轮（复测）
-- QC_R2: 质量确认第2轮（再复测）
-同一颗芯片在各文件中的chip_id(硅ID)相同，例如chip_id=11292的芯片在FT_R0和QC_R0中是同一颗物理芯片。不要用PART_ID(顺序编号)追踪芯片，不同文件中同一PART_ID对应不同物理芯片。
-不要将各轮次当成独立批次，不要累加芯片数。
+
+【测试流程】
+- FT（初测校准）：对芯片进行初次测试和校准。可能有 FT_R0/R1/R2，R0是初测，R1/R2是复测。
+- QC（加载FT校准值测试）：使用FT阶段校准值对芯片做质量验证。可能有 QC_R0/R1/R2，同上。
+- 同一批芯片走一套 FT + QC 完整流程，FT 在前，QC 在后。
+
+【复测规则】
+- R1/R2是复测，可能是全量复测，也可能只复测之前fail的芯片。
+- 复测pass即为pass。但R0 fail + R1 pass的芯片需关注——后续轮次未测试，稳定性不确定。
+- FT和QC良率独立计算，不跨类型判定。
+
+【芯片追踪】
+- 同一颗芯片在各文件中的chip_id(硅ID)相同，例如chip_id=11510在FT_R0和QC_R0中是同一颗物理芯片。
+- chip_id是芯片的硅ID(chip_id_1_l列)，不是PART_ID(顺序编号)。
+- 不要用PART_ID追踪芯片，不同文件中同一PART_ID对应不同物理芯片。
+- chip_id=0或负值的芯片，ID无法读取（通常是严重fail导致ID读不出），系统会回退到PART_ID做文件内标识，格式为"PART_50@文件名"，这类芯片无法跨文件追踪。
+- 同一文件中同一chip_id可能被测量多次（复测），系统自动取最后一次测量为最终结果，并标注测量次数。
+- 不要将各轮次当成独立批次，不要累加芯片数。
+
+【持续fail判定】
+- 在同一测试类型(FT或QC)内部判定持续fail，跨类型(FT+QC)不算持续fail。
+- 持续fail的芯片更可能是硬件缺陷，复测pass的芯片可能是偶发测试噪声。
+- 如果某测试类型只有一轮(如FT仅R0)，则R0的结果就是最终结果，R0 fail即为fail。查看 by_test_type 中 single_round=true 的 r0_fail_chips 和 r0_fail_test_items。
 
 强制分析流程（必须按序执行，不许跳过）：
 
-第一步：调 get_summary_stats — 看整体良率和Fail Bin分布
-第二步：调 list_data_files — 看有哪些数据文件和轮次
+第一步：调 get_summary_stats — 看FT和QC各自的良率
+第二步：调 list_data_files — 看有哪些FT和QC轮次
 第三步：对每个有fail的轮次，调 analyze_fail_items — 深入分析fail项
-第四步：【必须】调 find_persistent_fails — 找出跨轮次持续fail的芯片
+第四步：【必须】调 find_persistent_fails — 分别找出FT内部和QC内部持续fail的芯片
   这是区分偶发fail和硬件缺陷的关键步骤，绝不能跳过！
+  注意返回的 by_test_type 结构，FT和QC分别看。
+  注意 attention_list 中的需关注芯片（R0 fail + R1 pass 但无后续数据）。
 第五步：对find_persistent_fails返回的重点芯片，调 track_chip_across_rounds 深入追踪
-第六步：如果有多个轮次，调 compare_files 做对比
-第七步：综合所有数据输出最终报告
+  返回的 final_status 会标注 PASS/RETEST_PASS/FAIL 和不确定性。
+第六步：如果有多个轮次，调 compare_files 做对比（同类型内或跨类型）
+第七步：调 generate_charts — 生成图表（Fail柱状图、良率饼图、趋势折线图）
+  返回的图片路径用 ![描述](路径) 嵌入最终报告。
+第八步：综合所有数据输出最终报告
 
-注意：第1、2、4步是强制的。第4步(find_persistent_fails)是本次分析的核心价值所在。
+注意：第1、2、4步是强制的。第4步(find_persistent_fails)是核心价值所在。
 如果跳过跨轮次追踪分析，报告将无法区分"测试噪声"和"真实硬件问题"，这是不合格的。
 
 输出格式要求：
@@ -178,7 +207,11 @@ SYSTEM_PROMPT = f"""你是ATE（自动测试设备）芯片测试分析专家。
 - 不确定的用"可能"、"建议确认"等措辞
 - 用中文输出
 - 如果只看了一两个文件就出报告，这是不合格的
-- 最终报告中必须包含"跨轮次分析"章节，列出持续fail芯片及其详情"""
+- 最终报告必须包含以下章节：
+  1. "FT分析" — FT各轮次良率、持续fail芯片、需关注芯片
+  2. "QC分析" — QC各轮次良率、持续fail芯片、需关注芯片
+  3. "需关注芯片清单" — R0 fail + 复测pass但无后续数据的芯片
+  4. "跨轮次分析" — 持续fail芯片详情"""
 
 
 def parse_action(response_text):
@@ -190,6 +223,7 @@ def parse_action(response_text):
     param_line = m.group(2)
     if param_line:
         try:
+            # json.loads 将字符串转换为字典
             return tool_name, json.loads(param_line.strip())
         except json.JSONDecodeError:
             return tool_name, {}
@@ -213,6 +247,7 @@ def run_agent(user_request, max_steps=15):
     for step in range(max_steps):
         print(f"[Step {step+1}/{max_steps}] 思考中...")
         response = llm.chat(messages)
+        print(f"【Step】 {step+1} : response: {response}")
         full_log.append(f"\n--- Step {step+1} ---\n{response}")
         print(f"[Step {step+1}/{max_steps}] LLM 响应 ({len(response)} 字符)")
 
@@ -224,6 +259,8 @@ def run_agent(user_request, max_steps=15):
                 missing.append("还没有列出数据文件(list_data_files)")
             if 'find_persistent_fails' not in called_tools:
                 missing.append("⚠️ 还没有做跨轮次持续fail分析(find_persistent_fails)！这是区分偶发fail和硬件缺陷的关键步骤")
+            else:
+                missing.append("⚠️ 报告必须包含FT和QC分别的分析章节，以及需关注芯片清单")
 
             if all_data_files and not missing:
                 unanalyzed = [f for f in all_data_files if f not in analyzed_files]
@@ -361,7 +398,7 @@ if __name__ == "__main__":
                 break
 
     else:
-        request = args.request or "分析当前批次的ATE测试数据，重点关注跨轮次持续fail的芯片，输出诊断报告"
+        request = args.request or "分析当前批次的ATE测试数据，重点关注fail的芯片，给出fail芯片的相关fail项数据，输出诊断报告"
         print(f"[Agent] 请求: {request}")
         print("[Agent] 开始ReAct循环分析...\n")
 

@@ -1,147 +1,360 @@
 # ATE数据分析报告
 
-# WQ7037AXB 芯片ATE测试数据诊断报告
+# ATE测试数据分析诊断报告
 
-## 一、测试概况
-
-本批次共 **215颗** WQ7037AXB芯片，经历了4轮轮次测试：
-- **FT_R0**（出厂初测）：215颗
-- **QC_R0**（质量确认第0轮）：215颗中FAIL的芯片复测（文件记录451条，含多轮汇总数据）
-- **QC_R1**（质量确认第1轮）：82颗复测
-- **QC_R2**（质量确认第2轮）：6颗再复测
-
-| 轮次 | 测试芯片数 | PASS | FAIL | 良率 |
-|------|-----------|------|------|------|
-| FT_R0 | 215 | 200 | 15 | **93.0%** |
-| QC_R0* | 449 | 367 | 82 | 81.7% |
-| QC_R1 | 82 | 76 | 6 | **92.7%** |
-| QC_R2 | 6 | 3 | 3 | 50.0% |
-
-> *QC_R0文件包含451条记录，实际被测物理芯片为原215颗中的FAIL芯片及追加复测芯片。
+**批次**：WQ7037AXB_260508  
+**分析日期**：2025年  
+**数据文件**：FT_R0、QC_R0、QC_R1、QC_R2（共4个轮次）  
+**分析芯片总数**：449颗（FT 215颗 + QC复测流程）
 
 ---
 
-## 二、各轮次Fail Bin分布
+## 一、整体良率总览
 
-### 2.1 FT_R0 — 初测FAIL（15颗）
+| 测试类型 | 轮次 | 芯片数 | PASS | FAIL | 良率 | 备注 |
+|---------|------|--------|------|------|------|------|
+| **FT** | R0（初测） | 215 | 200 | 15 | **93.0%** | 仅一轮，无复测 |
+| **QC** | R0（首测） | 450 | 367 | 82 | 81.7% | 初始良率较低 |
+| **QC** | R1（复测1） | 82 | 76 | 6 | 92.7% | 恢复率92.7% |
+| **QC** | R2（复测2） | 6 | 3 | 3 | 50.0% | 最终3颗fail |
+| **QC汇总** | **最终** | 449 | 446 | **3** | **99.3%** | 复测后最终良率 |
 
-| Bin | 测试项 | 数量 | 占比 |
-|-----|--------|------|------|
-| 62 | mbist (存储器内建自测试) | 3 | 1.40% |
-| 7305 | xtal_25u (晶振25μA) | 3 | 1.40% |
-| 96 | shutdown (关断测试) | 2 | 0.93% |
-| 7500 | rf_img (射频镜像抑制) | 2 | 0.93% |
-| 60 | dc_scan (直流扫描) | 1 | 0.47% |
-| 70 | uvp_flag (欠压保护标志) | 1 | 0.47% |
-| 7103 | dc12 (DC12电源) | 1 | 0.47% |
-| 7219 | I_chg_100ma_V4P0 (充电电流) | 1 | 0.47% |
-| 7515 | tx_edr_pwr (发射EDR功率) | 1 | 0.47% |
-
-### 2.2 QC_R0 — 质量确认（82 FAIL）
-
-| Bin | 测试项 | 数量 | 占比 |
-|-----|--------|------|------|
-| 54 | **io_test (IO测试)** | **53** | **11.80%** |
-| 7710 | lbk_mic0 (音频回环MIC0) | 8 | 1.78% |
-| 61 | ac_scan (交流扫描) | 5 | 1.11% |
-| 40 | io_openshort (IO开短路) | 4 | 0.89% |
-| 其他 | rf_img, tx_horm等 | 12 | 2.68% |
-
-> ⚠️ **QC_R0的io_test异常**：53颗芯片（11.8%）因io_test fail，但QC_R1中该问题未再现。这可能表明io_test存在测试接触问题或测试环境波动，而非芯片硬件缺陷。
-
-### 2.3 QC_R1 — 复测（6 FAIL）
-- lbk_mic0(2), ac_scan(1), dc12(1), rx_iqm(1), lbk_mic1(1)
-
-### 2.4 QC_R2 — 再复测（3 FAIL）
-- lbk_mic0(1), dc12(1), rx_iqm(1)
+> **关键结论**：FT初测良率93.0%，QC经两轮复测后最终良率99.3%。76颗QC R0 fail芯片在R1恢复，3颗芯片在QC内部持续fail确认硬件缺陷。
 
 ---
 
-## 三、跨轮次持续Fail分析（核心发现） ⭐
+## 二、FT分析（初测校准）
 
-通过 `find_persistent_fails` 在≥2轮中持续fail的芯片**共17颗**。TOP持续fail测试项：
+### 2.1 FT整体情况
 
-| 排名 | 测试项 | 影响芯片数 | 风险等级 |
-|------|--------|-----------|---------|
-| 1 | **音频MIC1偏置电阻** (ptd_sts_audio_mic1_re) | 12 | 🔴 高 |
-| 2 | **音频MIC0偏置电阻** (ptd_sts_audio_mic0_re) | 10 | 🔴 高 |
-| 3 | **音频MIC2偏置电阻** (ptd_sts_audio_mic2_re) | 10 | 🔴 高 |
-| 4 | RF接收电流 (ptd_sts_rf_rx_dc_i_ma) | 1 | 🔴 高 |
-| 5 | DC12电源电压 (ptd_VDD12) | 1 | 🔴 高 |
+FT仅有**R0一轮**（无复测），15颗fail芯片即为最终判定，这些芯片**未进入QC阶段**。
 
-### 3.1 🔴 重点关注芯片
+### 2.2 FT Fail Bin分布
 
-#### 芯片 #11531 — RF接收电流持续超标（硬件缺陷高置信度）
-| 轮次 | 测试项 | 测量值 | 规格 | 结果 |
-|------|--------|--------|------|------|
-| FT_R0 | - | - | - | ✅ PASS |
-| QC_R0 | rf_rx_dc_i_ma | **61.0 mA** | 0~60mA | ❌ FAIL |
-| QC_R1 | rf_rx_dc_i_ma | **63.0 mA** | 0~60mA | ❌ FAIL |
-| QC_R2 | rf_rx_dc_i_ma | **67.0 mA** | 0~60mA | ❌ FAIL |
+| Fail Bin | 名称 | 芯片数 | 占比 |
+|----------|------|--------|------|
+| 62 | **mbist** | 3 | 1.40% |
+| 7305 | **xtal_25u** | 3 | 1.40% |
+| 96 | shutdown | 2 | 0.93% |
+| 7500 | rf_img | 2 | 0.93% |
+| 60 | dc_scan | 1 | 0.47% |
+| 70 | uvp_flag | 1 | 0.47% |
+| 7103 | dc12 | 1 | 0.47% |
+| 7219 | I_chg_100ma_V4P0 | 1 | 0.47% |
+| 7515 | tx_edr_pwr | 1 | 0.47% |
 
-> **诊断**：RF接收电流从61→63→67mA逐步恶化，超过规格上限60mA，且呈单调上升趋势。这是典型的**硬件退化信号**，可能原因：RF前端漏电流增大、内部偏置电路退化。**建议报废处理**。
+### 2.3 FT TOP Fail项详细分析
 
-#### 芯片 #11655 — DC12电源电压持续偏低（硬件缺陷高置信度）
-| 轮次 | 测试项 | 测量值 | 规格 | 结果 |
-|------|--------|--------|------|------|
-| FT_R0 | - | - | - | ✅ PASS |
-| QC_R0 | DC12_ocl_3p4 | **1.173 V** | 1.274~1.336V | ❌ FAIL |
-| QC_R1 | DC12_ocl_3p4 | **0.987 V** | 1.274~1.336V | ❌ FAIL |
-| QC_R2 | DC12_ocl_3p4 | **0.975 V** | 1.274~1.336V | ❌ FAIL |
+#### 🔴 MBIST类fail — 3颗芯片（严重）
 
-> **诊断**：DC12电压严重偏低（远低于1.274V下限），且从1.17→0.99→0.98V持续恶化。可能原因：内部LDO／DC-DC模块损坏、电源域短路或漏电。**建议报废处理**。
+| 芯片ID | Fail测试项数 | 代表性fail项 | 实测值 | 规格 |
+|--------|-------------|-------------|--------|------|
+| **11550** | 10+ | DFT.MBIST[#600005] | 1.0 | 0~0 |
+| **11598** | 10+ | DFT.MBIST_Retention[#600006] | 1.0 | 0~0 |
+| **11621** | 10+ | MBIST_LOOP系列 | 1.0 | 0~0 |
 
-#### 芯片 #11087 — 音频MIC全通道持续fail（硬件缺陷）
-| 轮次 | 测试项 | 测量值 | 规格 | 结果 |
-|------|--------|--------|------|------|
-| QC_R1 | mic0_re | 88.0 | 90~100 | ❌ FAIL |
-| QC_R1 | mic1_re | 89.4~89.8 | 90~100 | ❌ FAIL |
-| QC_R1 | mic2_re | 89.2~89.6 | 90~100 / 100~110 | ❌ FAIL |
-| QC_R2 | mic0_re | 61.0 / -65.9 | 90~100 / -110~-90 | ❌ FAIL |
-| QC_R2 | mic1_re | 63.0 / -68.0 | 90~100 / -110~-90 | ❌ FAIL |
-| QC_R2 | mic2_re | 66.0~76.2 / -71.0 | 90~100 / -110~-90 | ❌ FAIL |
+这3颗芯片在以下所有MBIST相关测试项上全部fail：
+- DFT.MBIST、DFT.MBIST_Retention
+- MBIST_LOOP（Ret0p7/0p8/0p9各重复100次）
+- MBIST0P9_0~4（5个电压档位）
 
-> **诊断**：QC_R2中MIC偏置电阻测量值进一步恶化（从88~89恶化到61~66），全三通道持续fail。音频模拟前端可能存在芯片级缺陷。**建议报废处理**。
+**诊断**：多电压条件和保持模式下的MBIST全部fail，强烈指示**SRAM硬件缺陷**（存储单元损坏或保持失效）。此类芯片不应进入后续流程，建议报废。
 
-#### 芯片 #11486 — 音频MIC + AC_SCAN复合fail
-| 轮次 | 结果 | 详情 |
-|------|------|------|
-| FT_R0 | ✅ PASS | - |
-| QC_R0 | ❌ FAIL (24项) | mic0/mic1/mic2_re多项fail，值严重偏离（20~85 vs 规格34~100） |
-| QC_R1 | ❌ FAIL (1项) | **AC_SCAN** fail (DFT扫描链测试) |
-| QC_R2 | ✅ PASS | - |
+#### 🟡 晶振电流类fail — 3颗芯片
 
-> **诊断**：QC_R0音频指标严重异常（24项fail），QC_R1又出现AC_SCAN fail（扫描链测试异常）。虽然QC_R2 PASS，但AC_SCAN fail提示芯片可能存在**数字逻辑／扫描链间歇性问题**。**建议标记为可疑，优先确认是否放行**。
+| 芯片ID | Fail项 | 说明 |
+|--------|--------|------|
+| **11535** | ptd_sts_madc_xtal_curr[#790394] | 晶振电流异常 |
+| **11538** | ptd_sts_madc_xtal_curr[#790394] | 晶振电流异常 |
+| **11580** | ptd_sts_madc_xtal_curr[#790394] | 晶振电流异常 |
 
----
+**诊断**：晶振电流异常可能导致时钟不稳定，影响芯片正常工作。建议报废。
 
-## 四、总结与建议
+#### 🟡 其他fail（7颗）
 
-### 4.1 最终良率评估
-- 从FT_R0初测215颗，200颗PASS（93.0%）
-- 多轮QC复测后，最终仍有**3颗芯片**在QC_R2持续FAIL（11531、11655、11087中的至少3颗）
-- **最终可用芯片约197~200颗**，整体良率约 **91.6%~93.0%**
+分布较散（shutdown、rf_img、dc_scan、uvp_flag、dc12、充电电流、TX EDR功率各1颗），为偶发性fail，FT阶段正确剔除。
 
-### 4.2 问题根因分类
+### 2.4 FT小结
 
-| 类别 | 芯片数 | 典型芯片 | 问题描述 |
-|------|--------|---------|---------|
-| 🔴 **确凿硬件缺陷** | 3 | 11531, 11655, 11087 | RF电流/DC12电压/音频MIC持续恶化 |
-| 🟡 **音频MIC疑似问题** | ~10 | 11486, 11505, 11506等 | 多芯片音频MIC偏置电阻持续fail，可能在某个电平时边界fail |
-| 🟠 **扫描链间歇性fail** | ~5 | 11486等 | AC_SCAN/DC_SCAN在不同轮次间或PASS或FAIL |
-| 🟢 **测试噪声/接触问题** | ~53 | - | QC_R0 io_test大量fail，复测未再现 |
-
-### 4.3 建议措施
-1. **立即报废**：芯片#11531、#11655、#11087（确凿硬件缺陷，持续恶化）
-2. **重点审查**：音频MIC持续fail的10颗芯片，需结合应用场景决定是否放行（若产品不使用模拟MIC，可能可接受）
-3. **优化测试**：QC_R0的io_test 53颗fail建议排查测试夹具接触问题，53颗在后续复测中消失说明高度可疑是测试环境而非芯片问题
-4. **扫描链fail**：DFT扫描链fail的芯片（ac_scan/dc_scan）建议增加Burn-in后复测，排除潜在可靠性风险
-5. **数据记录项**：所有100% fail的`ptd_done_bitmap`、`ptd_ate_cali_*`、`ptd_sts_*`类测试项实为数据记录标志位，非功能测试，建议从fail统计中排除，避免干扰良率计算
+| 维度 | 数值 |
+|------|------|
+| FT总芯片 | 215 |
+| FT良率 | 93.0% |
+| FT fail芯片 | 15颗（全部为R0 fail，无复测） |
+| 主要fail类型 | MBIST（3颗）、晶振电流（3颗）、其他偶发（9颗） |
+| 建议 | MBIST和晶振fail芯片建议提交FA分析 |
 
 ---
 
-*报告生成时间：基于ATE测试数据系统自动分析*  
-*数据来源：4个CSV数据文件，215颗WQ7037AXB芯片，共4轮测试*
+## 三、QC分析（加载校准值测试）
+
+### 3.1 QC各轮次流程
+
+```
+QC R0: 450颗 → 367 PASS, 82 FAIL（良率81.7%）
+                ↓ 82颗进入R1复测
+QC R1: 82颗复测 → 76 PASS, 6 FAIL（恢复率92.7%）
+                ↓ 6颗进入R2复测
+QC R2: 6颗复测 → 3 PASS, 3 FAIL（恢复率50%）
+
+最终QC良率：446/449 = 99.3%
+```
+
+> 复测流程使良率从81.7%提升至99.3%，**76颗R0 fail芯片在R1恢复**，说明大部分R0 fail为接触不良或测试噪声。
+
+### 3.2 QC R0 Fail项TOP分析
+
+QC R0中有82颗fail、571个fail项，高度集中在以下类别：
+
+| 排名 | Fail Bin | 测试项类别 | 芯片数 | 占比 | 说明 |
+|-----|----------|----------|--------|------|------|
+| 1 | **54 (io_test)** | IO功能测试 | 53 | 11.8% | GPIO03 VOH/VOL偏离规格 |
+| 2 | 7710 (lbk_mic0) | MIC0音频 | 8 | 1.78% | SNDR/SNR严重偏低 |
+| 3 | 61 (ac_scan) | AC扫描 | 5 | 1.11% | DFT AC_SCAN fail |
+| 4 | 40 (io_openshort) | 开路/短路 | 4 | 0.89% | OS连续性fail |
+| 5 | 7500 (rf_img) | RF镜像 | 2 | 0.45% | - |
+| 6 | 7517 (tx_horm) | TX谐波 | 2 | 0.45% | - |
+
+#### IO类fail详细（最大fail源）
+
+| 具体测试项 | Fail数 | 规格 | 平均fail值 | 偏离程度 |
+|-----------|--------|------|-----------|---------|
+| IO.VOH.AON_GPIO03[#540006] | 30 | 1.62~1.85V | 1.5627V | 轻微偏低(-3.5%) |
+| IO.VOH.GPIO03[#540004] | 15 | 1.62~1.85V | 1.5792V | 轻微偏低(-2.5%) |
+| IO.VOL.AON_GPIO03[#540014] | 15 | 0~0.18V | 0.2718V | 偏高(+51%) |
+| OS.Continuity_Pos_Func[#400000] | 17 | 0~0 | 1.0 | 完全fail |
+
+**诊断**：GPIO03输出电压轻微偏离规格（VOH偏低3.5%、VOL偏高51%），且大部分在R1恢复，**强烈提示测试接触问题**（探针接触电阻增大）。建议检查测试座和探针状态。
+
+#### MIC音频类fail
+
+| 芯片数 | 测试项 | Fail值 | 规格 |
+|--------|--------|--------|------|
+| 13颗 | mic0/1/2 sndr_dB | ~31.4dB | 90~100dB |
+| 13颗 | mic0/1/2 snr_dB | ~31.9dB | 90~100dB |
+| 13颗 | mic0/1/2 thd_noise_dBv | ~-33dBv | -110~-90dBv |
+
+**诊断**：MIC SNDR/SNR值约31-32dB（规格≥90dB），**偏离幅度极大（约60dB差距）**。thd_noise约-33dBv（规格≤-90dBv），噪声严重超标。13颗芯片表现一致，可能是：
+- **测试参考信号未正确注入**（音频回路断开）
+- **DUT板音频通路故障**
+- **测试程序音频配置错误**
+
+建议排查测试系统音频回路。
+
+### 3.3 QC持续Fail芯片（⚠️ 核心发现）
+
+经跨轮次追踪，发现**3颗芯片在QC内部≥2轮中持续fail**——这是区分测试噪声与硬件缺陷的关键证据：
+
+---
+
+#### 🔴 持续Fail #1：芯片 11087 — MIC音频持续恶化
+
+| 轮次 | 结果 | Bin | Fail项数 | 关键指标 |
+|------|------|-----|---------|----------|
+| QC R0 | **未出现** | - | - | 未在R0测试 |
+| QC R1 | **FAIL** | 7710 | 7项 | SNDR 88~89.4dB（边界fail） |
+| QC R2 | **FAIL** | 7710 | 12项 | SNDR **61~66dB**（大幅恶化） |
+
+**持续fail项（R1→R2，5项）**：
+- mic0_sndr: 88.0 → 61.0（恶化27dB）
+- mic0_snr: 88.0 → 61.0（恶化27dB）  
+- mic1_sndr: 89.4 → 63.0（恶化26.4dB）
+- mic1_snr: 89.8 → 63.0（恶化26.8dB）
+- mic2_sndr: 89.2 → 66.0（恶化23.2dB）
+
+**R2新增fail（7项）**：mic0/1/2 thd_noise和thd_ratio全部fail
+
+> 🚨 **严重性评估**：芯片音频性能从R1"接近及格"（~88dB，差2dB）**恶化到R2严重不合格**（~61dB，差29dB），性能持续退化。可能原因：**MIC通路放大器损坏或ADC性能衰减**。**强烈建议报废处理，并提交FA分析根因**。
+
+---
+
+#### 🔴 持续Fail #2：芯片 11531 — RF RX电流持续超标
+
+| 轮次 | 类型 | 结果 | 测试值 | 规格 | 变化趋势 |
+|------|------|------|--------|------|----------|
+| FT R0 | FT | **PASS** | - | - | 正常 |
+| QC R0 | QC | **FAIL** | **61.0** | 0~60 | +1.7% |
+| QC R1 | QC | **FAIL** | **63.0** | 0~60 | +5.0% |
+| QC R2 | QC | **FAIL** | **67.0** | 0~60 | +11.7% |
+
+**持续fail项**：`ptd_sts_rf_rx_dc_i_max[#790212]`（RF接收链路DC电流最大值）
+
+> 🚨 **严重性评估**：
+> - FT阶段PASS，QC三轮回合全部fail，**缺陷在FT后引入**
+> - 电流持续恶化：61→63→67，**呈线性增长趋势**
+> - 指示RF接收链路存在漏电流增大问题
+> - 可能原因：**ESD损伤、封装后金属迁移、或RX LNA偏置漂移**
+> 
+> **建议：报废处理，提交FA进行失效分析，排查封装工艺或ESD防护**
+
+---
+
+#### 🔴 持续Fail #3：芯片 11655 — DC12电压持续偏低
+
+| 轮次 | 类型 | 结果 | 测试值 | 规格 | 偏差 |
+|------|------|------|--------|------|------|
+| FT R0 | FT | **PASS** | - | - | 正常 |
+| QC R0 | QC | **FAIL** | **1.173V** | 1.274~1.336V | -7.9% |
+| QC R1 | QC | **FAIL** | **0.987V** | 1.274~1.336V | -22.5% |
+| QC R2 | QC | **FAIL** | **0.975V** | 1.274~1.336V | -23.5% |
+
+**持续fail项**：`DC12_ocl_3p4.ptd_VDD12[#710022]`（DC12过流保护电压）
+
+> 🚨 **严重性评估**：
+> - FT阶段PASS，QC三轮全部fail，**缺陷在FT后引入**
+> - VDD12电压：1.173→0.987→0.975V，**趋近稳定但远低于规格**
+> - 远低于规格下限（1.274V），偏差-23.5%
+> - 可能原因：**内部LDO损坏、DC-DC转换器故障、或电源域短路**
+> 
+> **建议：报废处理，提交FA分析电源管理模块**
+
+---
+
+### 3.4 QC R1/R2 Fail项分布
+
+#### QC R1（6颗fail）
+
+| 测试项 | Fail数 | 芯片ID |
+|--------|--------|--------|
+| OS Continuity | 3 | 11184, 11230, 11470 |
+| mic1 sndr/snr | 3 | 11087, 11307, 11456 |
+| mic0 sndr/snr | 2 | 11087, 11456 |
+
+#### QC R2（3颗fail）
+
+| 芯片ID | Fail项数 | 主要类别 |
+|--------|---------|----------|
+| 11087 | 12项 | 音频MIC全面fail |
+| 11531 | 1项 | RF RX电流 |
+| 11655 | 1项 | DC12电压 |
+
+---
+
+## 四、需关注芯片清单
+
+### 4.1 🔴 持续Fail芯片（确认缺陷，建议报废）
+
+| 芯片ID | FT | QC R0 | QC R1 | QC R2 | 缺陷类型 | 风险等级 |
+|--------|-----|-------|-------|-------|----------|----------|
+| **11087** | - | - | FAIL | FAIL | MIC音频持续恶化（61dB） | 🔴 严重 |
+| **11531** | PASS | FAIL | FAIL | FAIL | RF RX电流持续增大（61→67） | 🔴 严重 |
+| **11655** | PASS | FAIL | FAIL | FAIL | DC12电压持续偏低（0.975V） | 🔴 严重 |
+
+### 4.2 🟡 R0 fail → R1 pass（无后续验证，需谨慎评估）
+
+以下芯片在QC R0 fail但R1复测pass，由于无R2数据，**稳定性不确定**：
+
+#### 高风险（涉及DFT结构测试，不应轻易放行）
+
+| 芯片ID | R0 fail类别 | Fail项数 | 建议 |
+|--------|------------|----------|------|
+| **11622** | DFT DC/AC/MBIST扫描 | 6项 | 🔴 建议二次QC验证，DFT类fail即使复测pass也可能是间歇性缺陷 |
+| **11662** | DFT AC_SCAN + RF EVM | 6项 | 🟡 建议追加R2验证 |
+
+#### 中风险（RF/音频性能类）
+
+| 芯片ID | R0 fail类别 | Fail项数 | 建议 |
+|--------|------------|----------|------|
+| **11574** | TX Harmonic ch39/ch78 | 2项 | 建议抽检复测 |
+| **11478** | TX Harmonic ch39/ch78 | 2项 | 建议抽检复测 |
+| **11634** | RF TX（UPC/EVM/ACP/谐波） | 12项 | 建议追加R2验证 |
+| **11638** | RF TX（FLT/EVM/ACP） | 9项 | 建议追加R2验证 |
+| **11609** | RF TX（UPC/FLT/EVM） | 3项 | 建议抽检 |
+| **11552** | 音频MIC（mic0/1/2全面） | 13项 | 建议二次音频验证 |
+| **11256** | 音频MIC | 11项 | 建议二次音频验证 |
+| **11102** | 音频MIC | 12项 | 建议二次音频验证 |
+| **11506** | 音频MIC + 电源 | 16项 | 含madc_dldo0p8异常，建议追加验证 |
+| **11496** | 音频MIC信号功率 | 3项 | 建议抽检 |
+| **11505** | 音频MIC全面 | 24项 | 建议二次音频验证 |
+| **11479** | 音频MIC | 9项 | 建议抽检 |
+| **11500** | 音频MIC | 10项 | 建议抽检 |
+| **11495** | 性能测试（IDDQ/电流） | 21项 | 🟡 多项IDDQ和电流fail，建议追加验证 |
+
+### 4.3 🟡 R0 fail → R1 fail → R2 pass（多轮波动，需关注）
+
+| 芯片ID | R0 | R1 | R2 | Fail类别 | 建议 |
+|--------|-----|-----|-----|----------|------|
+| **11307** | 9项RX/TX fail | FAIL | PASS | RF EVM/谐波 | 🟡 两轮fail后恢复，测试波动较大 |
+| **11486** | 24项音频MIC | FAIL | PASS | 音频mic0/1/2 | 🟡 全面音频fail后恢复，可能是测试系统问题 |
+
+### 4.4 🟢 R1直接pass（在R0未出现，R1新进入）
+
+约50+颗芯片（详见attention_list）仅在R1出现且pass，这些为R0 fail芯片的复测通过，属于正常恢复。
+
+---
+
+## 五、跨轮次综合分析
+
+### 5.1 测试流程效率
+
+```
+FT R0: 215颗 → PASS 200颗（93.0%） → 进入QC
+              → FAIL 15颗（被剔除）
+
+QC流程: 450颗进入
+  R0: PASS 367 | FAIL 82 → R1复测82颗
+  R1: PASS 76（恢复92.7%）| FAIL 6 → R2复测6颗
+  R2: PASS 3（恢复50%）| FAIL 3（最终fail）
+
+最终: 446 PASS / 449 = 99.3%
+```
+
+### 5.2 跨类型对比（FT vs QC）
+
+| 维度 | FT R0 | QC R0 |
+|------|-------|-------|
+| 芯片数 | 215 | 450 |
+| 良率 | 93.0% | 81.7% |
+| 主要fail | MBIST、晶振 | IO接触、音频MIC |
+| fail类型 | 硬件结构缺陷为主 | 接触/性能边界为主 |
+
+QC R0良率（81.7%）低于FT R0（93.0%），但QC有复测流程，最终良率99.3%高于FT。QC R0的低良率主要由**IO测试接触问题**导致（53颗），并非芯片本身缺陷。
+
+### 5.3 关键发现总结
+
+| 发现 | 严重性 | 涉及芯片 | 说明 |
+|------|--------|----------|------|
+| FT MBIST缺陷 | 🔴高 | 11550/11598/11621 | SRAM硬件缺陷，已剔除 |
+| FT晶振异常 | 🟡中 | 11535/11538/11580 | 晶振电流异常，已剔除 |
+| QC持续fail（音频退化） | 🔴高 | 11087 | MIC性能持续恶化，需FA |
+| QC持续fail（RX电流） | 🔴高 | 11531 | FT PASS→QC恶化，需FA |
+| QC持续fail（电源） | 🔴高 | 11655 | VDD12电压异常，需FA |
+| QC IO接触问题 | 🟢低 | 53颗 | 大部分R1恢复 |
+| QC音频MIC异常 | 🟡中 | 13颗 | 可能测试系统问题 |
+
+### 5.4 需提交FA分析的芯片
+
+建议将以下芯片提交失效分析：
+
+1. **#11531**（最高优先级）— FT PASS→QC持续恶化，RF RX漏电流递增，典型后期缺陷模式
+2. **#11655**（高优先级）— FT PASS→QC持续fail，VDD12电压严重偏低，电源管理模块疑损
+3. **#11087**（高优先级）— 音频性能持续退化，可能为放大器或ADC衰减
+4. **#11550/#11598/#11621**（常规优先级）— FT MBIST fail，SRAM硬件缺陷
+
+---
+
+## 六、诊断建议
+
+1. **立即报废3颗持续fail芯片**（#11087, #11531, #11655），提交FA分析根因。
+
+2. **IQ测试座维护**：QC R0中53颗IO fail集中在GPIO03，且大部分R1恢复，强烈建议检查测试座探针磨损、清洁度和接触压力。
+
+3. **音频测试回路排查**：13颗芯片MIC SNDR低至~31dB（规格≥90dB），为系统性偏差，建议检查：
+   - 音频参考信号源是否正确连接
+   - DUT板音频通路是否完好
+   - 测试程序音频配置参数
+
+4. **高风险芯片不放行**：#11622（DFT MBIST/SCAN fail后恢复），建议二次QC验证或直接报废。DFT类fail恢复后仍存在间歇性故障风险。
+
+5. **复测通过芯片抽检**：从70+颗"R0 fail→R1 pass"芯片中，抽取DFT类和电源类fail芯片做QC R2验证，确认复测的稳定性。
+
+6. **封装/老化工艺排查**：#11531和#11655均为FT PASS→QC fail模式，建议排查封装工艺（键合、塑封）和老化应力是否引入损伤。
+
+---
+
+> 📊 **图表生成**：系统环境缺少matplotlib模块，未能生成可视化图表。建议在本地环境运行`generate_charts`工具生成：Fail项柱状图、良率饼图、良率趋势折线图。
+
+> 📝 **数据来源**：WQ7037AXB批次（260508），4个数据文件：FT_R0（215颗）、QC_R0（450颗）、QC_R1（82颗）、QC_R2（6颗）。FT和QC为同一批芯片的不同测试阶段，最终芯片数以QC为准（449颗）。
 
 ---
 ## Agent分析日志
@@ -149,14 +362,13 @@
 ```
 
 --- Step 1 ---
-[思考] 用户要求分析ATE测试数据，重点关注跨轮次持续fail的芯片。按照强制分析流程，我先从整体数据概况入手。
+[思考] 开始分析当前批次的ATE测试数据。首先获取整体良率汇总信息，了解FT和QC各自的良率情况。
 
-第一步：获取整体良率汇总。
 [工具: get_summary_stats]
 [观察] get_summary_stats 返回: {
-  "note": "⚠️ 所有轮次是同一批芯片(215颗)的重复测量，不是独立批次。不要累加各轮次的芯片数。",
   "rounds": {
     "FT_R0": {
+      "test_type": "FT",
       "total_chips": 215,
       "pass": 200,
       "fail": 15,
@@ -182,239 +394,186 @@
         },
         {
           "bin": "7500",
- 
+          "name": "rf_img",
+      
 
 --- Step 2 ---
-[思考] 整体数据已获取。FT_R0良率93%，QC_R0良率81.7%（io_test fail 53颗非常突出），QC_R1良率92.7%，QC_R2良率50%。现在需要列出具体数据文件，然后深入分析每个轮次的fail项。
 
-第二步：列出数据文件。
+
+--- Step 3 ---
+[思考] 已获取整体良率汇总。现在需要查看具体的ATE数据文件列表，确认有哪些轮次文件及其概要信息。
+
 [工具: list_data_files]
 [观察] list_data_files 返回: {
   "files": [
     {
       "filename": "WQ7037AXB_200_260508_FT_R0.csv",
-      "test_type": "R0",
+      "test_type": "FT",
       "round": "R0",
       "chips": 215,
       "test_items": 963,
-      "fail_items": 251
+      "fail_items": 148
     },
     {
       "filename": "WQ7037AXB_260508_QC_R0.csv",
-      "test_type": "R0",
+      "test_type": "QC",
       "round": "R0",
-      "chips": 451,
+      "chips": 450,
       "test_items": 892,
-      "fail_items": 555
+      "fail_items": 571
     },
     {
       "filename": "WQ7037AXB_260508_QC_R1.csv",
-      "test_type": "R1",
+      "test_type": "QC",
       "round": "R1",
       "chips": 82,
       "test_items": 892,
-      "fail_items": 108
+      "fail_items": 17
     },
     {
       "filename": "WQ7037AXB_260508_QC_R2.csv",
+ 
 
-
---- Step 3 ---
-[思考] 四个轮次数据文件已列出。FT_R0有215芯片/251 fail项，QC_R0有451芯片（可能是QC_R0+QC_R1+QC_R2的汇总？但文件名是QC_R0单独文件）、QC_R1有82芯片、QC_R2有6芯片。现在按流程第三步，对每个有fail的轮次分析fail详情。先从FT_R0开始。
+--- Step 4 ---
+[思考] 看到有FT_R0、QC_R0、QC_R1、QC_R2四个轮次。FT只有R0一轮（无复测）。QC有三个轮次。现在先分析FT_R0的fail详情。
 
 [工具: analyze_fail_items]
 {"filename": "WQ7037AXB_200_260508_FT_R0.csv"}
 [观察] analyze_fail_items 返回: {
   "filename": "WQ7037AXB_200_260508_FT_R0.csv",
+  "test_type": "FT",
+  "round": "R0",
   "total_chips": 215,
   "total_test_items": 963,
-  "fail_item_count": 251,
+  "fail_item_count": 148,
   "note": "⚠️ fail_chip_ids中的ID是chip_id(硅ID)，同一ID在不同轮次文件中是同一颗物理芯片，可用于跨轮次追踪。",
   "top_fails": [
     {
-      "test_item": "ANALOG.Charger_trim.Charger_Triming.ptd_value_S0_1",
-      "spec": "3~11mA",
-      "fail_count": 215,
-      "fail_rate": "100.0%",
+      "test_item": "DFT.MBIST[#600005]",
+      "spec": "0~0",
+      "fail_count": 3,
+      "fail_rate": "1.4%",
       "fail_chip_ids": [
-        "11450",
-        "11451",
-        "11452",
-        "11453",
-        "11454"
+        "11550",
+        "11598",
+        "11621"
       ],
-      "avg_fail_value": "1.4879"
+      "avg_fail_value": "1.0000"
     },
     {
-      "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_done_b
+      "test_item": "DFT.MBIST_Retention[#600006]",
+      "spec": "0~0",
+      "fail_count": 3,
 
---- Step 4 ---
-[思考] FT_R0的TOP10 fail项全部是100% fail的项（如ptd_done_bitmap等），这些看起来是数据记录/标志位，并非真正的功能测试fail。真正需要关注的fail项在get_summary_stats中按Bin分类的部分（mbist、xtal_25u等）。现在继续分析QC_R0。
-
+--- Step 5 ---
 [工具: analyze_fail_items]
 {"filename": "WQ7037AXB_260508_QC_R0.csv"}
 [观察] analyze_fail_items 返回: {
   "filename": "WQ7037AXB_260508_QC_R0.csv",
-  "total_chips": 451,
+  "test_type": "QC",
+  "round": "R0",
+  "total_chips": 450,
   "total_test_items": 892,
-  "fail_item_count": 555,
+  "fail_item_count": 571,
   "note": "⚠️ fail_chip_ids中的ID是chip_id(硅ID)，同一ID在不同轮次文件中是同一颗物理芯片，可用于跨轮次追踪。",
   "top_fails": [
     {
-      "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_done_bitmap_rf_fl",
-      "spec": "12256~12256",
-      "fail_count": 393,
-      "fail_rate": "87.1%",
+      "test_item": "IO.VOH.AON_GPIO03[#540006]",
+      "spec": "1.62~1.85V",
+      "fail_count": 30,
+      "fail_rate": "6.7%",
       "fail_chip_ids": [
-        "11326",
-        "11324",
-        "11321",
-        "11316",
-        "11314"
-      ],
-      "avg_fail_value": "3825.0000"
-    },
-    {
-      "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_don
+        "PART_50@WQ7037AXB_260508_QC_R0.csv",
+        "PART_97@WQ7037AXB_260508_QC_R0.csv",
+        "PART_103@WQ7037AXB_260508_QC_R0.csv",
+        "PART_116@WQ7037AXB_260508_QC_R0.csv",
+ 
 
---- Step 5 ---
+--- Step 6 ---
+
+
+--- Step 7 ---
 [工具: analyze_fail_items]
 {"filename": "WQ7037AXB_260508_QC_R1.csv"}
 [观察] analyze_fail_items 返回: {
   "filename": "WQ7037AXB_260508_QC_R1.csv",
+  "test_type": "QC",
+  "round": "R1",
   "total_chips": 82,
   "total_test_items": 892,
-  "fail_item_count": 108,
+  "fail_item_count": 17,
   "note": "⚠️ fail_chip_ids中的ID是chip_id(硅ID)，同一ID在不同轮次文件中是同一颗物理芯片，可用于跨轮次追踪。",
   "top_fails": [
     {
-      "test_item": "ANALOG.Charger_trim.Charger_Triming.ptd_value_S0_1",
-      "spec": "2~12mA",
-      "fail_count": 82,
-      "fail_rate": "100.0%",
+      "test_item": "OS.Continuity_Pos_Func.gOS_DUT[#400000]",
+      "spec": "0~0",
+      "fail_count": 3,
+      "fail_rate": "3.7%",
       "fail_chip_ids": [
-        "11067",
-        "11069",
-        "11087",
-        "11102",
-        "11117"
+        "11184",
+        "11230",
+        "11470"
       ],
-      "avg_fail_value": "1.6216"
+      "avg_fail_value": "1.0000"
     },
     {
-      "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_done_bitmap_
+      "test_item": "OS.Continuity_Neg_Func.gOS_DUT[#410000]",
+      "spec": "0~
 
---- Step 6 ---
+--- Step 8 ---
 [工具: analyze_fail_items]
 {"filename": "WQ7037AXB_260508_QC_R2.csv"}
 [观察] analyze_fail_items 返回: {
   "filename": "WQ7037AXB_260508_QC_R2.csv",
+  "test_type": "QC",
+  "round": "R2",
   "total_chips": 6,
   "total_test_items": 877,
-  "fail_item_count": 104,
+  "fail_item_count": 14,
   "note": "⚠️ fail_chip_ids中的ID是chip_id(硅ID)，同一ID在不同轮次文件中是同一颗物理芯片，可用于跨轮次追踪。",
   "top_fails": [
     {
-      "test_item": "ANALOG.Charger_trim.Charger_Triming.ptd_value_S0_1",
-      "spec": "2~12mA",
-      "fail_count": 6,
-      "fail_rate": "100.0%",
+      "test_item": "ANALOG.PMU_trim.DC12_ocl_3p4.ptd_VDD12[#710022]",
+      "spec": "1.274~1.336V",
+      "fail_count": 1,
+      "fail_rate": "16.7%",
       "fail_chip_ids": [
-        "11456",
-        "11486",
-        "11655",
-        "11531",
-        "11307"
+        "11655"
       ],
-      "avg_fail_value": "1.6059"
+      "avg_fail_value": "0.9755"
     },
     {
-      "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_done_bitmap_rf
+      "test_item": "ANALOG.Dump_Datalog.ptd_sts_rf_rx_dc_i_max[#790212]",
+      "spec": "0~60",
 
---- Step 7 ---
-[思考] 四个轮次的fail详情都已分析。注意分析出的TOP10 fail项主要是数据记录/标志位类型的项（ptd_done_bitmap、ptd_sts_*等），100%芯片在这些项上"fail"实际上是数据格式问题，不是真正的功能故障。真正的功能fail在get_summary_stats的Fail Bin中。现在进入核心第四步：跨轮次持续fail分析。
 
+--- Step 9 ---
 [工具: find_persistent_fails]
 {"min_rounds": 2}
 [观察] find_persistent_fails 返回: {
-  "total_chips_analyzed": 464,
-  "persistent_fail_count": 17,
-  "min_rounds_threshold": 2,
-  "summary": "共464颗芯片中，17颗在≥2轮中存在持续fail项；TOP持续fail测试项: ANALOG.Dump_Datalog.ptdGroup.ptd_sts_audio_mic1_re, ANALOG.Dump_Datalog.ptdGroup.ptd_sts_audio_mic0_re, ANALOG.Dump_Datalog.ptdGroup.ptd_sts_audio_mic2_re",
-  "persistent_chips": [
-    {
-      "chip_id": "11456",
-      "persistent_fail_items": [
+  "by_test_type": {
+    "FT": {
+      "rounds_analyzed": [
+        "R0"
+      ],
+      "single_round": true,
+      "persistent_fail_count": 0,
+      "persistent_fail_chips": [],
+      "persistent_test_items": [],
+      "note": "FT仅有一轮测试，R0结果即为最终结果",
+      "r0_fail_chip_count": 14,
+      "r0_fail_test_items": [
         {
-          "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_sts_audio_mic0_re",
-          "fail_rounds": [
-            "R1",
-            "R1",
-            "R1",
-            "R1"
-          ],
-        
-
---- Step 8 ---
-[思考] 跨轮次分析结果非常关键。发现17颗芯片有持续fail项。TOP持续fail项集中在音频MIC测试（ptd_sts_audio_mic*_re），涉及10~12颗芯片。另外还有RF接收电流（11531）、DC12电源（11655）等真正硬件相关的持续fail。现在第五步：追踪重点芯片。先追踪涉及RF问题的11531。
-
-[工具: track_chip_across_rounds]
-{"chip_id": "11531"}
-[观察] track_chip_across_rounds 返回: {
-  "chip_id": "11531",
-  "total_rounds_tested": 4,
-  "rounds": [
-    {
-      "filename": "WQ7037AXB_200_260508_FT_R0.csv",
-      "round": "R0",
-      "hard_bin": "1",
-      "soft_bin": "1",
-      "pass_fail": "P",
-      "fail_count": 0,
-      "fail_items": []
-    },
-    {
-      "filename": "WQ7037AXB_260508_QC_R0.csv",
-      "round": "R0",
-      "hard_bin": "7",
-      "soft_bin": "7503",
-      "pass_fail": "F",
-      "fail_count": 1,
-      "fail_items": [
+          "test_item": "ANALOG.Dump_Datalog.ptd_sts_madc_xtal_curr[#790394]",
+          "affected_chips": 3,
+          "chip_ids": [
+            "11535",
+            "11538",
+            "11580"
+          ]
+        },
         {
-          "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_sts_rf_rx_dc_i_ma",
-          "value": 61.0,
-          "spec": "0~60"
-  
-
---- Step 9 ---
-[工具: track_chip_across_rounds]
-{"chip_id": "11655"}
-[观察] track_chip_across_rounds 返回: {
-  "chip_id": "11655",
-  "total_rounds_tested": 4,
-  "rounds": [
-    {
-      "filename": "WQ7037AXB_200_260508_FT_R0.csv",
-      "round": "R0",
-      "hard_bin": "1",
-      "soft_bin": "1",
-      "pass_fail": "P",
-      "fail_count": 0,
-      "fail_items": []
-    },
-    {
-      "filename": "WQ7037AXB_260508_QC_R0.csv",
-      "round": "R0",
-      "hard_bin": "7",
-      "soft_bin": "7103",
-      "pass_fail": "F",
-      "fail_count": 1,
-      "fail_items": [
-        {
-          "test_item": "ANALOG.PMU_trim.DC12_ocl_3p4.ptd_VDD12",
-          "value": 1.173378,
-          "spec": "1.274~1.336"
+          "test_item": "DFT.MBIST[#600005]",
    
 
 --- Step 10 ---
@@ -426,35 +585,35 @@
   "rounds": [
     {
       "filename": "WQ7037AXB_260508_QC_R1.csv",
+      "test_type": "QC",
       "round": "R1",
+      "round_index": 1,
       "hard_bin": "7",
       "soft_bin": "7710",
       "pass_fail": "F",
       "fail_count": 7,
       "fail_items": [
         {
-          "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_sts_audio_mic0_re",
+          "test_item": "ANALOG.Dump_Datalog.ptd_sts_audio_mic0_result_1_mic_sndr_dB[#790507]",
           "value": 88.0,
           "spec": "90~100"
         },
         {
-          "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_sts_audio_mic0_re",
-          "value": 88.0,
-          "spec": "90~100"
-        },
-        {
-          "test_item": "ANALOG.
+          "test_item": "ANALOG.Dump_Datalog.ptd_sts_audio_mic0_result_1_mic_snr_dB[#790508]",
+          "value": 8
 
 --- Step 11 ---
 [工具: track_chip_across_rounds]
-{"chip_id": "11486"}
+{"chip_id": "11531"}
 [观察] track_chip_across_rounds 返回: {
-  "chip_id": "11486",
+  "chip_id": "11531",
   "total_rounds_tested": 4,
   "rounds": [
     {
       "filename": "WQ7037AXB_200_260508_FT_R0.csv",
+      "test_type": "FT",
       "round": "R0",
+      "round_index": 0,
       "hard_bin": "1",
       "soft_bin": "1",
       "pass_fail": "P",
@@ -463,194 +622,646 @@
     },
     {
       "filename": "WQ7037AXB_260508_QC_R0.csv",
+      "test_type": "QC",
       "round": "R0",
+      "round_index": 0,
       "hard_bin": "7",
-      "soft_bin": "7710",
+      "soft_bin": "7503",
       "pass_fail": "F",
-      "fail_count": 24,
+      "fail_count": 1,
       "fail_items": [
         {
-          "test_item": "ANALOG.Dump_Datalog.ptdGroup.ptd_sts_audio_mic0_re",
-          "value": 20.0,
-          "spec": "36~50"
-
+          "test_item": "ANALOG.
 
 --- Step 12 ---
+[工具: track_chip_across_rounds]
+{"chip_id": "11655"}
+[观察] track_chip_across_rounds 返回: {
+  "chip_id": "11655",
+  "total_rounds_tested": 4,
+  "rounds": [
+    {
+      "filename": "WQ7037AXB_200_260508_FT_R0.csv",
+      "test_type": "FT",
+      "round": "R0",
+      "round_index": 0,
+      "hard_bin": "1",
+      "soft_bin": "1",
+      "pass_fail": "P",
+      "fail_count": 0,
+      "fail_items": []
+    },
+    {
+      "filename": "WQ7037AXB_260508_QC_R0.csv",
+      "test_type": "QC",
+      "round": "R0",
+      "round_index": 0,
+      "hard_bin": "7",
+      "soft_bin": "7103",
+      "pass_fail": "F",
+      "fail_count": 1,
+      "fail_items": [
+        {
+          "test_item": "ANALOG.
+
+--- Step 13 ---
 [工具: compare_files]
 {"filenames": ["WQ7037AXB_200_260508_FT_R0.csv", "WQ7037AXB_260508_QC_R0.csv", "WQ7037AXB_260508_QC_R1.csv", "WQ7037AXB_260508_QC_R2.csv"]}
 [观察] compare_files 返回: {
   "comparison": [
     {
       "filename": "WQ7037AXB_200_260508_FT_R0.csv",
-      "type": "R0",
+      "test_type": "FT",
+      "round": "R0",
       "chips": 215,
       "test_items": 963,
-      "fail_items": 251
+      "fail_items": 148
     },
     {
       "filename": "WQ7037AXB_260508_QC_R0.csv",
-      "type": "R0",
-      "chips": 451,
+      "test_type": "QC",
+      "round": "R0",
+      "chips": 450,
       "test_items": 892,
-      "fail_items": 555
+      "fail_items": 571
     },
     {
       "filename": "WQ7037AXB_260508_QC_R1.csv",
-      "type": "R1",
+      "test_type": "QC",
+      "round": "R1",
       "chips": 82,
       "test_items": 892,
-      "fail_items": 108
+      "fail_items": 17
     },
     {
-      "filename": "WQ7037AXB_260508_QC_R2.csv",
-      "type": "R2",
-      "chips": 6,
-      "test_items": 877,
-      "fai
+      "filename": "WQ7037AXB_260508_QC_R2.cs
 
---- Step 13 ---
+--- Step 14 ---
+[工具: generate_charts]
+[观察] generate_charts 返回: 工具执行错误: No module named 'matplotlib'
+
+--- Step 15 ---
 [最终报告]
 
-# WQ7037AXB 芯片ATE测试数据诊断报告
+# ATE测试数据分析诊断报告
 
-## 一、测试概况
+## 一、总体概况
 
-本批次共 **215颗** WQ7037AXB芯片，经历了4轮轮次测试：
-- **FT_R0**（出厂初测）：215颗
-- **QC_R0**（质量确认第0轮）：215颗中FAIL的芯片复测（文件记录451条，含多轮汇总数据）
-- **QC_R1**（质量确认第1轮）：82颗复测
-- **QC_R2**（质量确认第2轮）：6颗再复测
+| 测试类型 | 轮次 | 芯片数 | PASS | FAIL | 良率 |
+|---------|------|--------|------|------|------|
+| **FT** | R0（初测） | 215 | 200 | 15 | **93.0%** |
+| **QC** | R0（首测） | 450 | 367 | 82 | 81.7% |
+| **QC** | R1（复测1） | 82 | 76 | 6 | 92.7% |
+| **QC** | R2（复测2） | 6 | 3 | 3 | 50.0% |
+| **QC汇总** | 最终 | 449 | 446 | **3** | **99.3%** |
 
-| 轮次 | 测试芯片数 | PASS | FAIL | 良率 |
-|------|-----------|------|------|------|
-| FT_R0 | 215 | 200 | 15 | **93.0%** |
-| QC_R0* | 449 | 367 | 82 | 81.7% |
-| QC_R1 | 82 | 76 | 6 | **92.7%** |
-| QC_R2 | 6 | 3 | 3 | 50.0% |
-
-> *QC_R0文件包含451条记录，实际被测物理芯片为原215颗中的FAIL芯片及追加复测芯片。
+> **关键结论**：FT初测良率93.0%，QC经两轮复测后最终良率99.3%，仅3颗芯片确认硬件缺陷。QC复测流程有效恢复了76颗R0 fail芯片，但仍有3颗芯片在多个轮次中持续fail，需重点关注。
 
 ---
 
-## 二、各轮次Fail Bin分布
+## 二、FT分析
 
-### 2.1 FT_R0 — 初测FAIL（15颗）
+### 2.1 FT整体情况
 
-| Bin | 测试项 | 数量 | 占比 |
-|-----|--------|------|------|
-| 62 | mbist (存储器内建自测试) | 3 | 1.40% |
-| 7305 | xtal_25u (晶振25μA) | 3 | 1.40% |
-| 96 | shutdown (关断测试) | 2 | 0.93% |
-| 7500 | rf_img (射频镜像抑制) | 2 | 0.93% |
-| 60 | dc_scan (直流扫描) | 1 | 0.47% |
-| 70 | uvp_flag (欠压保护标志) | 1 | 0.47% |
-| 7103 | dc12 (DC12电源) | 1 | 0.47% |
-| 7219 | I_chg_100ma_V4P0 (充电电流) | 1 | 0.47% |
-| 7515 | tx_edr_pwr (发射EDR功率) | 1 | 0.47% |
+FT仅有R0一轮（无复测），**15颗fail芯片即为最终判定**，良率93.0%。
 
-### 2.2 QC_R0 — 质量确认（82 FAIL）
+### 2.2 FT主要Fail项分布
 
-| Bin | 测试项 | 数量 | 占比 |
-|-----|--------|------|------|
-| 54 | **io_test (IO测试)** | **53** | **11.80%** |
-| 7710 | lbk_mic0 (音频回环MIC0) | 8 | 1.78% |
-| 61 | ac_scan (交流扫描) | 5 | 1.11% |
-| 40 | io_openshort (IO开短路) | 4 | 0.89% |
-| 其他 | rf_img, tx_horm等 | 12 | 2.68% |
+| 排名 | Fail Bin | 测试项类别 | 芯片数 | 占比 | 影响chip_id |
+|-----|----------|----------|--------|------|------------|
+| 1 | **mbist** (62) | MBIST内存测试 | 3 | 1.40% | 11550, 11598, 11621 |
+| 2 | **xtal_25u** (7305) | 晶振电流 | 3 | 1.40% | 11535, 11538, 11580 |
+| 3 | **shutdown** (96) | 关机测试 | 2 | 0.93% | - |
+| 4 | **rf_img** (7500) | RF镜像 | 2 | 0.93% | - |
+| 5 | dc_scan (60) | DC扫描 | 1 | 0.47% | - |
+| 6 | uvp_flag (70) | 欠压标志 | 1 | 0.47% | - |
+| 7 | dc12 (7103) | DC12电压 | 1 | 0.47% | - |
+| 8 | I_chg_100ma_V4P0 (7219) | 充电电流 | 1 | 0.47% | - |
+| 9 | tx_edr_pwr (7515) | TX EDR功率 | 1 | 0.47% | - |
 
-> ⚠️ **QC_R0的io_test异常**：53颗芯片（11.8%）因io_test fail，但QC_R1中该问题未再现。这可能表明io_test存在测试接触问题或测试环境波动，而非芯片硬件缺陷。
+### 2.3 FT MBIST Fail详细分析（重点关注）
 
-### 2.3 QC_R1 — 复测（6 FAIL）
-- lbk_mic0(2), ac_scan(1), dc12(1), rx_iqm(1), lbk_mic1(1)
+3颗芯片（**11550, 11598, 11621**）在MBIST相关**10个测试项**上全部fail，fail值均为1.0（期望0）。MBIST是存储器内建自测试，这些测试项包括：
 
-### 2.4 QC_R2 — 再复测（3 FAIL）
-- lbk_mic0(1), dc12(1), rx_iqm(1)
+- DFT.MBIST、DFT.MBIST_Retention
+- MBIST_LOOP系列（Ret0p7/0p8/0p9各重复100次）
+- MBIST0P9_0~4系列
+
+**诊断**：这3颗芯片在多个电压条件下的MBIST和Retention MBIST均fail，强烈指示**存储器硬件缺陷**（可能为SRAM位单元损坏或保持失效），不建议进入QC阶段。
 
 ---
 
-## 三、跨轮次持续Fail分析（核心发现） ⭐
+## 三、QC分析
 
-通过 `find_persistent_fails` 在≥2轮中持续fail的芯片**共17颗**。TOP持续fail测试项：
+### 3.1 QC各轮次对比
 
-| 排名 | 测试项 | 影响芯片数 | 风险等级 |
-|------|--------|-----------|---------|
-| 1 | **音频MIC1偏置电阻** (ptd_sts_audio_mic1_re) | 12 | 🔴 高 |
-| 2 | **音频MIC0偏置电阻** (ptd_sts_audio_mic0_re) | 10 | 🔴 高 |
-| 3 | **音频MIC2偏置电阻** (ptd_sts_audio_mic2_re) | 10 | 🔴 高 |
-| 4 | RF接收电流 (ptd_sts_rf_rx_dc_i_ma) | 1 | 🔴 高 |
-| 5 | DC12电源电压 (ptd_VDD12) | 1 | 🔴 高 |
+```
+QC_R0: 450颗 → 82 Fail（良率81.7%）
+   ↓ 82颗进入R1复测
+QC_R1: 82颗复测 → 76 Pass, 6 Fail（恢复率92.7%）
+   ↓ 6颗进入R2复测
+QC_R2: 6颗复测 → 3 Pass, 3 Fail（恢复率50%）
+   
+最终QC良率：446/449 = 99.3%（仅3颗最终fail）
+```
 
-### 3.1 🔴 重点关注芯片
+### 3.2 QC R0 Fail项TOP分析
 
-#### 芯片 #11531 — RF接收电流持续超标（硬件缺陷高置信度）
-| 轮次 | 测试项 | 测量值 | 规格 | 结果 |
-|------|--------|--------|------|------|
-| FT_R0 | - | - | - | ✅ PASS |
-| QC_R0 | rf_rx_dc_i_ma | **61.0 mA** | 0~60mA | ❌ FAIL |
-| QC_R1 | rf_rx_dc_i_ma | **63.0 mA** | 0~60mA | ❌ FAIL |
-| QC_R2 | rf_rx_dc_i_ma | **67.0 mA** | 0~60mA | ❌ FAIL |
+QC R0中fail项高度集中在**IO测试**（bin 54，53颗/11.8%）和**音频MIC测试**（bin 7710，8颗/1.78%）：
 
-> **诊断**：RF接收电流从61→63→67mA逐步恶化，超过规格上限60mA，且呈单调上升趋势。这是典型的**硬件退化信号**，可能原因：RF前端漏电流增大、内部偏置电路退化。**建议报废处理**。
+| 测试项 | Fail数 | 规格 | 均值 | 说明 |
+|--------|--------|------|------|------|
+| IO.VOH.AON_GPIO03 | 30 | 1.62~1.85V | 1.5627V | GPIO输出电压偏低 |
+| OS.Continuity_Pos_Func | 17 | 0~0 | 1.0 | 开路/短路连续性fail |
+| IO.VOH.GPIO03 | 15 | 1.62~1.85V | 1.5792V | GPIO输出电压偏低 |
+| IO.VOL.AON_GPIO03 | 15 | 0~0.18V | 0.2718V | GPIO输出低电平偏高 |
+| mic_sndr/snr (mic0/1/2) | 各13 | 90~100dB | ~31.4dB | MIC信噪比/信纳比严重fail |
 
-#### 芯片 #11655 — DC12电源电压持续偏低（硬件缺陷高置信度）
-| 轮次 | 测试项 | 测量值 | 规格 | 结果 |
-|------|--------|--------|------|------|
-| FT_R0 | - | - | - | ✅ PASS |
-| QC_R0 | DC12_ocl_3p4 | **1.173 V** | 1.274~1.336V | ❌ FAIL |
-| QC_R1 | DC12_ocl_3p4 | **0.987 V** | 1.274~1.336V | ❌ FAIL |
-| QC_R2 | DC12_ocl_3p4 | **0.975 V** | 1.274~1.336V | ❌ FAIL |
+**诊断**：
+- **IO类fail（53颗）** 是QC R0最大fail源，GPIO03输出电压偏离规格，可能为**测试接触问题**或芯片IO驱动能力不足。大部分在R1中恢复，支持接触不良假设。
+- **MIC音频fail** 值为31~32dB（规格90~100dB），远低于规格，可能为测试配置或参考信号问题。
 
-> **诊断**：DC12电压严重偏低（远低于1.274V下限），且从1.17→0.99→0.98V持续恶化。可能原因：内部LDO／DC-DC模块损坏、电源域短路或漏电。**建议报废处理**。
+### 3.3 QC持续Fail芯片（⚠️ 核心发现）
 
-#### 芯片 #11087 — 音频MIC全通道持续fail（硬件缺陷）
-| 轮次 | 测试项 | 测量值 | 规格 | 结果 |
-|------|--------|--------|------|------|
-| QC_R1 | mic0_re | 88.0 | 90~100 | ❌ FAIL |
-| QC_R1 | mic1_re | 89.4~89.8 | 90~100 | ❌ FAIL |
-| QC_R1 | mic2_re | 89.2~89.6 | 90~100 / 100~110 | ❌ FAIL |
-| QC_R2 | mic0_re | 61.0 / -65.9 | 90~100 / -110~-90 | ❌ FAIL |
-| QC_R2 | mic1_re | 63.0 / -68.0 | 90~100 / -110~-90 | ❌ FAIL |
-| QC_R2 | mic2_re | 66.0~76.2 / -71.0 | 90~100 / -110~-90 | ❌ FAIL |
+经跨轮次追踪分析，发现**3颗芯片在QC内部≥2轮中持续fail**：
 
-> **诊断**：QC_R2中MIC偏置电阻测量值进一步恶化（从88~89恶化到61~66），全三通道持续fail。音频模拟前端可能存在芯片级缺陷。**建议报废处理**。
+#### 🔴 芯片#11087 — MIC音频持续恶化
 
-#### 芯片 #11486 — 音频MIC + AC_SCAN复合fail
-| 轮次 | 结果 | 详情 |
-|------|------|------|
-| FT_R0 | ✅ PASS | - |
-| QC_R0 | ❌ FAIL (24项) | mic0/mic1/mic2_re多项fail，值严重偏离（20~85 vs 规格34~100） |
-| QC_R1 | ❌ FAIL (1项) | **AC_SCAN** fail (DFT扫描链测试) |
-| QC_R2 | ✅ PASS | - |
+| 轮次 | 结果 | Fail数 | 关键fail值 |
+|------|------|--------|------------|
+| QC R1 | FAIL | 7项 | mic_sndr 88~89.4dB（边界），mic_thd_ratio 99dB |
+| QC R2 | FAIL | 12项 | mic_sndr **61~66dB**（大幅恶化） |
 
-> **诊断**：QC_R0音频指标严重异常（24项fail），QC_R1又出现AC_SCAN fail（扫描链测试异常）。虽然QC_R2 PASS，但AC_SCAN fail提示芯片可能存在**数字逻辑／扫描链间歇性问题**。**建议标记为可疑，优先确认是否放行**。
+**持续fail项（R1→R2）**：mic0/1/2 sndr和snr，共5项
+**新增fail项（R2）**：mic0/1/2 thd_noise和thd_ratio，共7项
 
----
+> ⚠️ **严重性**：芯片音频性能从R1的"接近及格"（~88dB）恶化到R2的"严重不合格"（~61dB），**性能持续退化**。可能原因：MIC通路放大器老化/损坏、ADC性能衰减。**建议报废处理**。
 
-## 四、总结与建议
+#### 🔴 芯片#11531 — RF RX电流持续超标
 
-### 4.1 最终良率评估
-- 从FT_R0初测215颗，200颗PASS（93.0%）
-- 多轮QC复测后，最终仍有**3颗芯片**在QC_R2持续FAIL（11531、11655、11087中的至少3颗）
-- **最终可用芯片约197~200颗**，整体良率约 **91.6%~93.0%**
+| 轮次 | 结果 | 测试值 | 规格 |
+|------|------|--------|------|
+| FT R0 | **PASS** | - | - |
+| QC R0 | FAIL | **61.0** | 0~60 |
+| QC R1 | FAIL | **63.0** | 0~60 |
+| QC R2 | FAIL | **67.0** | 0~60 |
 
-### 4.2 问题根因分类
+**持续fail项**：`ptd_sts_rf_rx_dc_i_max`（RF RX DC电流最大值）
 
-| 类别 | 芯片数 | 典型芯片 | 问题描述 |
-|------|--------|---------|---------|
-| 🔴 **确凿硬件缺陷** | 3 | 11531, 11655, 11087 | RF电流/DC12电压/音频MIC持续恶化 |
-| 🟡 **音频MIC疑似问题** | ~10 | 11486, 11505, 11506等 | 多芯片音频MIC偏置电阻持续fail，可能在某个电平时边界fail |
-| 🟠 **扫描链间歇性fail** | ~5 | 11486等 | AC_SCAN/DC_SCAN在不同轮次间或PASS或FAIL |
-| 🟢 **测试噪声/接触问题** | ~53 | - | QC_R0 io_test大量fail，复测未再现 |
+> ⚠️ **严重性**：FT阶段通过，但在QC三轮回合中**全部fail且持续恶化**（61→63→67）。指示RF接收链路存在**潜在的漏电流增大问题**，可能为芯片封装后出现的缺陷（ESD损伤或金属迁移）。**建议报废并提交FA分析**。
 
-### 4.3 建议措施
-1. **立即报废**：芯片#11531、#11655、#11087（确凿硬件缺陷，持续恶化）
-2. **重点审查**：音频MIC持续fail的10颗芯片，需结合应用场景决定是否放行（若产品不使用模拟MIC，可能可接受）
-3. **优化测试**：QC_R0的io_test 53颗fail建议排查测试夹具接触问题，53颗在后续复测中消失说明高度可疑是测试环境而非芯片问题
-4. **扫描链fail**：DFT扫描链fail的芯片（ac_scan/dc_scan）建议增加Burn-in后复测，排除潜在可靠性风险
-5. **数据记录项**：所有100% fail的`ptd_done_bitmap`、`ptd_ate_cali_*`、`ptd_sts_*`类测试项实为数据记录标志位，非功能测试，建议从fail统计中排除，避免干扰良率计算
+#### 🔴 芯片#11655 — DC12电压持续偏低
+
+| 轮次 | 结果 | 测试值 | 规格 |
+|------|------|--------|------|
+| FT R0 | **PASS** | - | - |
+| QC R0 | FAIL | **1.173V** | 1.274~1.336V |
+| QC R1 | FAIL | **0.987V** | 1.274~1.336V |
+| QC R2 | FAIL | **0.975V** | 1.274~1.336V |
+
+**持续fail项**：`DC12_ocl_3p4.ptd_VDD12`（DC12过流保护电压）
+
+> ⚠️ **严重性**：VDD12电压持续偏低且恶化（1.17→0.99→0.98V），远低于规格下限。指示**内部LDO或电源管理模块损坏**，可能为DC-DC转换器故障或短路。**建议报废处理**。
 
 ---
 
-*报告生成时间：基于ATE测试数据系统自动分析*  
-*数据来源：4个CSV数据文件，215颗WQ7037AXB芯片，共4轮测试*
+## 四、需关注芯片清单
+
+### 4.1 R0 fail + R1 pass（无后续数据）
+
+以下芯片在QC R0 fail但R1复测pass，**稳定性不确定**，建议**谨慎评估是否放行**：
+
+| chip_id | R0 fail类别 | R0 fail项数 | 风险评估 |
+|---------|------------|-------------|----------|
+| **11622** | DFT扫描+MBIST | 6项 | 🔴 高 — DC/AC_SCAN + MBIST为结构测试fail，虽R1复测pass，可能仍存在潜在可靠性问题 |
+| **11574** | RF谐波 | 2项 | 🟡 中 — TX Harmonic ch39/ch78 fail |
+| **11478** | RF谐波 | 2项 | 🟡 中 — TX Harmonic ch39/ch78 fail |
+| **11634** | RF UPC/EVM/谐波 | 12项 | 🟡 中 — 多项RF发射指标fail |
+| **11552** | 音频MIC（全面） | 13项 | 🟡 中 — mic0/1/2 sndr/snr/thd全面fail |
+| **11256** | 音频MIC | 11项 | 🟡 中 — mic0/1/2音频性能fail |
+| **11102** | 音频MIC | 12项 | 🟡 中 — mic0/1/2全面fail |
+| **11506** | 音频MIC+电源 | 16项 | 🟡 中 — 包含madc_dldo0p8异常 |
+| **11495** | 性能测试（IDDQ/电流） | 21项 | 🟡 中 — 多项IDDQ和电流测试fail |
+| **11638** | RF TX多项 | 9项 | 🟡 中 — FLT_Trim+EVM+ACP fail |
+| **11662** | AC_SCAN+RF | 6项 | 🟡 中 — DFT AC_SCAN + RF EVM fail |
+
+### 4.2 R0 fail → R1 fail → R2 pass（已恢复但有风险）
+
+| chip_id | R0 fail项数 | R2结果 | 风险 |
+|---------|------------|--------|------|
+| **11307** | 9项（RF TX EVM+谐波） | R2 PASS | 🟡 — 两轮fail后第三轮pass，可能是测试条件波动，但波动较大 |
+| **11486** | 24项（音频MIC全面fail） | R2 PASS | 🟡 — mic0/1/2几乎所有项目fail两轮后恢复，测试系统可能存在问题 |
+
+---
+
+## 五、跨轮次综合分析
+
+### 5.1 测试流程有效性
+
+```
+FT R0: 215颗 → 200颗进入QC
+QC流程: 450颗（含FT PASS的200颗 + 其他来源250颗）
+  → R0 fail 82颗 → R1 恢复76颗（恢复率92.7%）
+  → R1 fail 6颗 → R2 恢复3颗（恢复率50%）
+  → 最终fail: 3颗（0.67%）
+```
+
+复测流程显著提升了良率（81.7%→99.3%），说明**大量R0 fail为接触不良或测试噪声**，而非芯片本身缺陷。
+
+### 5.2 FT Fail vs QC表现
+
+- FT fail的15颗芯片未在QC数据中观察到（ID未出现），推测已被FT阶段剔除
+- **11531** 和 **11655** 在FT中PASS，但在QC中持续fail，说明缺陷是在**FT后（可能封装/老化过程）引入的**
+- **11087** 未出现在FT数据中，同样可能为后期引入缺陷
+
+### 5.3 主要问题域
+
+| 问题域 | 涉及芯片数 | 严重性 | 说明 |
+|--------|-----------|--------|------|
+| **IO/GPIO** | 53颗（QC R0） | 🟢 低 | 大部分R1恢复，疑似接触问题 |
+| **音频MIC** | 10+颗 | 🟡 中 | 部分恢复，1颗持续恶化（#11087） |
+| **RF性能** | 5+颗 | 🟡 中 | 11531持续fail（RX电流） |
+| **电源管理** | 2颗 | 🔴 高 | 11655持续fail（VDD12），11495多项电流fail |
+| **DFT/MBIST** | 3颗（FT）+1颗（QC） | 🔴 高 | FT中3颗MBIST fail，QC中11622 DFT fail |
+
+---
+
+## 六、诊断建议
+
+1. **立即报废**：3颗持续fail芯片（**#11087, #11531, #11655**），建议提交**FA（失效分析）**，特别是#11531（FT PASS→QC持续恶化）和#11655（VDD12电压异常）值得深入分析根因。
+
+2. **高风险不放行**：**#11622**（DFT SCAN+MBIST fail后R1恢复），建议**二次QC验证**或直接报废，DFT类fail不应轻易放行。
+
+3. **IO测试优化**：53颗IO fail集中在GPIO03，建议检查**测试座接触和探针状态**，可能为批量接触不良。
+
+4. **MIC音频校准检查**：QC R0中大量MIC SNDR低至~31dB（规格90~100dB），值异常一致，可能是**测试参考信号未正确配置**或**音频回路校准问题**。
+
+5. **FT MBIST芯片确认**：FT中3颗MBIST fail芯片（11550/11598/11621）确认已从流程中剔除，检查物理芯片流向。
+
+6. **复测通过芯片跟踪**：约70颗"R0 fail→R1 pass"芯片无后续数据，建议**抽检其中高风险芯片**（DFT类、电源类fail）做QC R2验证。
+
+---
+
+> 📊 图表生成：系统环境缺少matplotlib模块，未能生成可视化图表，建议在本地环境补充运行。
+
+> 📝 数据来源：WQ7037AXB批次（260508），共4个数据文件，分析时间2025年。
+
+--- Final ---
+[最终报告]
+
+# ATE测试数据分析诊断报告
+
+**批次**：WQ7037AXB_260508  
+**分析日期**：2025年  
+**数据文件**：FT_R0、QC_R0、QC_R1、QC_R2（共4个轮次）  
+**分析芯片总数**：449颗（FT 215颗 + QC复测流程）
+
+---
+
+## 一、整体良率总览
+
+| 测试类型 | 轮次 | 芯片数 | PASS | FAIL | 良率 | 备注 |
+|---------|------|--------|------|------|------|------|
+| **FT** | R0（初测） | 215 | 200 | 15 | **93.0%** | 仅一轮，无复测 |
+| **QC** | R0（首测） | 450 | 367 | 82 | 81.7% | 初始良率较低 |
+| **QC** | R1（复测1） | 82 | 76 | 6 | 92.7% | 恢复率92.7% |
+| **QC** | R2（复测2） | 6 | 3 | 3 | 50.0% | 最终3颗fail |
+| **QC汇总** | **最终** | 449 | 446 | **3** | **99.3%** | 复测后最终良率 |
+
+> **关键结论**：FT初测良率93.0%，QC经两轮复测后最终良率99.3%。76颗QC R0 fail芯片在R1恢复，3颗芯片在QC内部持续fail确认硬件缺陷。
+
+---
+
+## 二、FT分析（初测校准）
+
+### 2.1 FT整体情况
+
+FT仅有**R0一轮**（无复测），15颗fail芯片即为最终判定，这些芯片**未进入QC阶段**。
+
+### 2.2 FT Fail Bin分布
+
+| Fail Bin | 名称 | 芯片数 | 占比 |
+|----------|------|--------|------|
+| 62 | **mbist** | 3 | 1.40% |
+| 7305 | **xtal_25u** | 3 | 1.40% |
+| 96 | shutdown | 2 | 0.93% |
+| 7500 | rf_img | 2 | 0.93% |
+| 60 | dc_scan | 1 | 0.47% |
+| 70 | uvp_flag | 1 | 0.47% |
+| 7103 | dc12 | 1 | 0.47% |
+| 7219 | I_chg_100ma_V4P0 | 1 | 0.47% |
+| 7515 | tx_edr_pwr | 1 | 0.47% |
+
+### 2.3 FT TOP Fail项详细分析
+
+#### 🔴 MBIST类fail — 3颗芯片（严重）
+
+| 芯片ID | Fail测试项数 | 代表性fail项 | 实测值 | 规格 |
+|--------|-------------|-------------|--------|------|
+| **11550** | 10+ | DFT.MBIST[#600005] | 1.0 | 0~0 |
+| **11598** | 10+ | DFT.MBIST_Retention[#600006] | 1.0 | 0~0 |
+| **11621** | 10+ | MBIST_LOOP系列 | 1.0 | 0~0 |
+
+这3颗芯片在以下所有MBIST相关测试项上全部fail：
+- DFT.MBIST、DFT.MBIST_Retention
+- MBIST_LOOP（Ret0p7/0p8/0p9各重复100次）
+- MBIST0P9_0~4（5个电压档位）
+
+**诊断**：多电压条件和保持模式下的MBIST全部fail，强烈指示**SRAM硬件缺陷**（存储单元损坏或保持失效）。此类芯片不应进入后续流程，建议报废。
+
+#### 🟡 晶振电流类fail — 3颗芯片
+
+| 芯片ID | Fail项 | 说明 |
+|--------|--------|------|
+| **11535** | ptd_sts_madc_xtal_curr[#790394] | 晶振电流异常 |
+| **11538** | ptd_sts_madc_xtal_curr[#790394] | 晶振电流异常 |
+| **11580** | ptd_sts_madc_xtal_curr[#790394] | 晶振电流异常 |
+
+**诊断**：晶振电流异常可能导致时钟不稳定，影响芯片正常工作。建议报废。
+
+#### 🟡 其他fail（7颗）
+
+分布较散（shutdown、rf_img、dc_scan、uvp_flag、dc12、充电电流、TX EDR功率各1颗），为偶发性fail，FT阶段正确剔除。
+
+### 2.4 FT小结
+
+| 维度 | 数值 |
+|------|------|
+| FT总芯片 | 215 |
+| FT良率 | 93.0% |
+| FT fail芯片 | 15颗（全部为R0 fail，无复测） |
+| 主要fail类型 | MBIST（3颗）、晶振电流（3颗）、其他偶发（9颗） |
+| 建议 | MBIST和晶振fail芯片建议提交FA分析 |
+
+---
+
+## 三、QC分析（加载校准值测试）
+
+### 3.1 QC各轮次流程
+
+```
+QC R0: 450颗 → 367 PASS, 82 FAIL（良率81.7%）
+                ↓ 82颗进入R1复测
+QC R1: 82颗复测 → 76 PASS, 6 FAIL（恢复率92.7%）
+                ↓ 6颗进入R2复测
+QC R2: 6颗复测 → 3 PASS, 3 FAIL（恢复率50%）
+
+最终QC良率：446/449 = 99.3%
+```
+
+> 复测流程使良率从81.7%提升至99.3%，**76颗R0 fail芯片在R1恢复**，说明大部分R0 fail为接触不良或测试噪声。
+
+### 3.2 QC R0 Fail项TOP分析
+
+QC R0中有82颗fail、571个fail项，高度集中在以下类别：
+
+| 排名 | Fail Bin | 测试项类别 | 芯片数 | 占比 | 说明 |
+|-----|----------|----------|--------|------|------|
+| 1 | **54 (io_test)** | IO功能测试 | 53 | 11.8% | GPIO03 VOH/VOL偏离规格 |
+| 2 | 7710 (lbk_mic0) | MIC0音频 | 8 | 1.78% | SNDR/SNR严重偏低 |
+| 3 | 61 (ac_scan) | AC扫描 | 5 | 1.11% | DFT AC_SCAN fail |
+| 4 | 40 (io_openshort) | 开路/短路 | 4 | 0.89% | OS连续性fail |
+| 5 | 7500 (rf_img) | RF镜像 | 2 | 0.45% | - |
+| 6 | 7517 (tx_horm) | TX谐波 | 2 | 0.45% | - |
+
+#### IO类fail详细（最大fail源）
+
+| 具体测试项 | Fail数 | 规格 | 平均fail值 | 偏离程度 |
+|-----------|--------|------|-----------|---------|
+| IO.VOH.AON_GPIO03[#540006] | 30 | 1.62~1.85V | 1.5627V | 轻微偏低(-3.5%) |
+| IO.VOH.GPIO03[#540004] | 15 | 1.62~1.85V | 1.5792V | 轻微偏低(-2.5%) |
+| IO.VOL.AON_GPIO03[#540014] | 15 | 0~0.18V | 0.2718V | 偏高(+51%) |
+| OS.Continuity_Pos_Func[#400000] | 17 | 0~0 | 1.0 | 完全fail |
+
+**诊断**：GPIO03输出电压轻微偏离规格（VOH偏低3.5%、VOL偏高51%），且大部分在R1恢复，**强烈提示测试接触问题**（探针接触电阻增大）。建议检查测试座和探针状态。
+
+#### MIC音频类fail
+
+| 芯片数 | 测试项 | Fail值 | 规格 |
+|--------|--------|--------|------|
+| 13颗 | mic0/1/2 sndr_dB | ~31.4dB | 90~100dB |
+| 13颗 | mic0/1/2 snr_dB | ~31.9dB | 90~100dB |
+| 13颗 | mic0/1/2 thd_noise_dBv | ~-33dBv | -110~-90dBv |
+
+**诊断**：MIC SNDR/SNR值约31-32dB（规格≥90dB），**偏离幅度极大（约60dB差距）**。thd_noise约-33dBv（规格≤-90dBv），噪声严重超标。13颗芯片表现一致，可能是：
+- **测试参考信号未正确注入**（音频回路断开）
+- **DUT板音频通路故障**
+- **测试程序音频配置错误**
+
+建议排查测试系统音频回路。
+
+### 3.3 QC持续Fail芯片（⚠️ 核心发现）
+
+经跨轮次追踪，发现**3颗芯片在QC内部≥2轮中持续fail**——这是区分测试噪声与硬件缺陷的关键证据：
+
+---
+
+#### 🔴 持续Fail #1：芯片 11087 — MIC音频持续恶化
+
+| 轮次 | 结果 | Bin | Fail项数 | 关键指标 |
+|------|------|-----|---------|----------|
+| QC R0 | **未出现** | - | - | 未在R0测试 |
+| QC R1 | **FAIL** | 7710 | 7项 | SNDR 88~89.4dB（边界fail） |
+| QC R2 | **FAIL** | 7710 | 12项 | SNDR **61~66dB**（大幅恶化） |
+
+**持续fail项（R1→R2，5项）**：
+- mic0_sndr: 88.0 → 61.0（恶化27dB）
+- mic0_snr: 88.0 → 61.0（恶化27dB）  
+- mic1_sndr: 89.4 → 63.0（恶化26.4dB）
+- mic1_snr: 89.8 → 63.0（恶化26.8dB）
+- mic2_sndr: 89.2 → 66.0（恶化23.2dB）
+
+**R2新增fail（7项）**：mic0/1/2 thd_noise和thd_ratio全部fail
+
+> 🚨 **严重性评估**：芯片音频性能从R1"接近及格"（~88dB，差2dB）**恶化到R2严重不合格**（~61dB，差29dB），性能持续退化。可能原因：**MIC通路放大器损坏或ADC性能衰减**。**强烈建议报废处理，并提交FA分析根因**。
+
+---
+
+#### 🔴 持续Fail #2：芯片 11531 — RF RX电流持续超标
+
+| 轮次 | 类型 | 结果 | 测试值 | 规格 | 变化趋势 |
+|------|------|------|--------|------|----------|
+| FT R0 | FT | **PASS** | - | - | 正常 |
+| QC R0 | QC | **FAIL** | **61.0** | 0~60 | +1.7% |
+| QC R1 | QC | **FAIL** | **63.0** | 0~60 | +5.0% |
+| QC R2 | QC | **FAIL** | **67.0** | 0~60 | +11.7% |
+
+**持续fail项**：`ptd_sts_rf_rx_dc_i_max[#790212]`（RF接收链路DC电流最大值）
+
+> 🚨 **严重性评估**：
+> - FT阶段PASS，QC三轮回合全部fail，**缺陷在FT后引入**
+> - 电流持续恶化：61→63→67，**呈线性增长趋势**
+> - 指示RF接收链路存在漏电流增大问题
+> - 可能原因：**ESD损伤、封装后金属迁移、或RX LNA偏置漂移**
+> 
+> **建议：报废处理，提交FA进行失效分析，排查封装工艺或ESD防护**
+
+---
+
+#### 🔴 持续Fail #3：芯片 11655 — DC12电压持续偏低
+
+| 轮次 | 类型 | 结果 | 测试值 | 规格 | 偏差 |
+|------|------|------|--------|------|------|
+| FT R0 | FT | **PASS** | - | - | 正常 |
+| QC R0 | QC | **FAIL** | **1.173V** | 1.274~1.336V | -7.9% |
+| QC R1 | QC | **FAIL** | **0.987V** | 1.274~1.336V | -22.5% |
+| QC R2 | QC | **FAIL** | **0.975V** | 1.274~1.336V | -23.5% |
+
+**持续fail项**：`DC12_ocl_3p4.ptd_VDD12[#710022]`（DC12过流保护电压）
+
+> 🚨 **严重性评估**：
+> - FT阶段PASS，QC三轮全部fail，**缺陷在FT后引入**
+> - VDD12电压：1.173→0.987→0.975V，**趋近稳定但远低于规格**
+> - 远低于规格下限（1.274V），偏差-23.5%
+> - 可能原因：**内部LDO损坏、DC-DC转换器故障、或电源域短路**
+> 
+> **建议：报废处理，提交FA分析电源管理模块**
+
+---
+
+### 3.4 QC R1/R2 Fail项分布
+
+#### QC R1（6颗fail）
+
+| 测试项 | Fail数 | 芯片ID |
+|--------|--------|--------|
+| OS Continuity | 3 | 11184, 11230, 11470 |
+| mic1 sndr/snr | 3 | 11087, 11307, 11456 |
+| mic0 sndr/snr | 2 | 11087, 11456 |
+
+#### QC R2（3颗fail）
+
+| 芯片ID | Fail项数 | 主要类别 |
+|--------|---------|----------|
+| 11087 | 12项 | 音频MIC全面fail |
+| 11531 | 1项 | RF RX电流 |
+| 11655 | 1项 | DC12电压 |
+
+---
+
+## 四、需关注芯片清单
+
+### 4.1 🔴 持续Fail芯片（确认缺陷，建议报废）
+
+| 芯片ID | FT | QC R0 | QC R1 | QC R2 | 缺陷类型 | 风险等级 |
+|--------|-----|-------|-------|-------|----------|----------|
+| **11087** | - | - | FAIL | FAIL | MIC音频持续恶化（61dB） | 🔴 严重 |
+| **11531** | PASS | FAIL | FAIL | FAIL | RF RX电流持续增大（61→67） | 🔴 严重 |
+| **11655** | PASS | FAIL | FAIL | FAIL | DC12电压持续偏低（0.975V） | 🔴 严重 |
+
+### 4.2 🟡 R0 fail → R1 pass（无后续验证，需谨慎评估）
+
+以下芯片在QC R0 fail但R1复测pass，由于无R2数据，**稳定性不确定**：
+
+#### 高风险（涉及DFT结构测试，不应轻易放行）
+
+| 芯片ID | R0 fail类别 | Fail项数 | 建议 |
+|--------|------------|----------|------|
+| **11622** | DFT DC/AC/MBIST扫描 | 6项 | 🔴 建议二次QC验证，DFT类fail即使复测pass也可能是间歇性缺陷 |
+| **11662** | DFT AC_SCAN + RF EVM | 6项 | 🟡 建议追加R2验证 |
+
+#### 中风险（RF/音频性能类）
+
+| 芯片ID | R0 fail类别 | Fail项数 | 建议 |
+|--------|------------|----------|------|
+| **11574** | TX Harmonic ch39/ch78 | 2项 | 建议抽检复测 |
+| **11478** | TX Harmonic ch39/ch78 | 2项 | 建议抽检复测 |
+| **11634** | RF TX（UPC/EVM/ACP/谐波） | 12项 | 建议追加R2验证 |
+| **11638** | RF TX（FLT/EVM/ACP） | 9项 | 建议追加R2验证 |
+| **11609** | RF TX（UPC/FLT/EVM） | 3项 | 建议抽检 |
+| **11552** | 音频MIC（mic0/1/2全面） | 13项 | 建议二次音频验证 |
+| **11256** | 音频MIC | 11项 | 建议二次音频验证 |
+| **11102** | 音频MIC | 12项 | 建议二次音频验证 |
+| **11506** | 音频MIC + 电源 | 16项 | 含madc_dldo0p8异常，建议追加验证 |
+| **11496** | 音频MIC信号功率 | 3项 | 建议抽检 |
+| **11505** | 音频MIC全面 | 24项 | 建议二次音频验证 |
+| **11479** | 音频MIC | 9项 | 建议抽检 |
+| **11500** | 音频MIC | 10项 | 建议抽检 |
+| **11495** | 性能测试（IDDQ/电流） | 21项 | 🟡 多项IDDQ和电流fail，建议追加验证 |
+
+### 4.3 🟡 R0 fail → R1 fail → R2 pass（多轮波动，需关注）
+
+| 芯片ID | R0 | R1 | R2 | Fail类别 | 建议 |
+|--------|-----|-----|-----|----------|------|
+| **11307** | 9项RX/TX fail | FAIL | PASS | RF EVM/谐波 | 🟡 两轮fail后恢复，测试波动较大 |
+| **11486** | 24项音频MIC | FAIL | PASS | 音频mic0/1/2 | 🟡 全面音频fail后恢复，可能是测试系统问题 |
+
+### 4.4 🟢 R1直接pass（在R0未出现，R1新进入）
+
+约50+颗芯片（详见attention_list）仅在R1出现且pass，这些为R0 fail芯片的复测通过，属于正常恢复。
+
+---
+
+## 五、跨轮次综合分析
+
+### 5.1 测试流程效率
+
+```
+FT R0: 215颗 → PASS 200颗（93.0%） → 进入QC
+              → FAIL 15颗（被剔除）
+
+QC流程: 450颗进入
+  R0: PASS 367 | FAIL 82 → R1复测82颗
+  R1: PASS 76（恢复92.7%）| FAIL 6 → R2复测6颗
+  R2: PASS 3（恢复50%）| FAIL 3（最终fail）
+
+最终: 446 PASS / 449 = 99.3%
+```
+
+### 5.2 跨类型对比（FT vs QC）
+
+| 维度 | FT R0 | QC R0 |
+|------|-------|-------|
+| 芯片数 | 215 | 450 |
+| 良率 | 93.0% | 81.7% |
+| 主要fail | MBIST、晶振 | IO接触、音频MIC |
+| fail类型 | 硬件结构缺陷为主 | 接触/性能边界为主 |
+
+QC R0良率（81.7%）低于FT R0（93.0%），但QC有复测流程，最终良率99.3%高于FT。QC R0的低良率主要由**IO测试接触问题**导致（53颗），并非芯片本身缺陷。
+
+### 5.3 关键发现总结
+
+| 发现 | 严重性 | 涉及芯片 | 说明 |
+|------|--------|----------|------|
+| FT MBIST缺陷 | 🔴高 | 11550/11598/11621 | SRAM硬件缺陷，已剔除 |
+| FT晶振异常 | 🟡中 | 11535/11538/11580 | 晶振电流异常，已剔除 |
+| QC持续fail（音频退化） | 🔴高 | 11087 | MIC性能持续恶化，需FA |
+| QC持续fail（RX电流） | 🔴高 | 11531 | FT PASS→QC恶化，需FA |
+| QC持续fail（电源） | 🔴高 | 11655 | VDD12电压异常，需FA |
+| QC IO接触问题 | 🟢低 | 53颗 | 大部分R1恢复 |
+| QC音频MIC异常 | 🟡中 | 13颗 | 可能测试系统问题 |
+
+### 5.4 需提交FA分析的芯片
+
+建议将以下芯片提交失效分析：
+
+1. **#11531**（最高优先级）— FT PASS→QC持续恶化，RF RX漏电流递增，典型后期缺陷模式
+2. **#11655**（高优先级）— FT PASS→QC持续fail，VDD12电压严重偏低，电源管理模块疑损
+3. **#11087**（高优先级）— 音频性能持续退化，可能为放大器或ADC衰减
+4. **#11550/#11598/#11621**（常规优先级）— FT MBIST fail，SRAM硬件缺陷
+
+---
+
+## 六、诊断建议
+
+1. **立即报废3颗持续fail芯片**（#11087, #11531, #11655），提交FA分析根因。
+
+2. **IQ测试座维护**：QC R0中53颗IO fail集中在GPIO03，且大部分R1恢复，强烈建议检查测试座探针磨损、清洁度和接触压力。
+
+3. **音频测试回路排查**：13颗芯片MIC SNDR低至~31dB（规格≥90dB），为系统性偏差，建议检查：
+   - 音频参考信号源是否正确连接
+   - DUT板音频通路是否完好
+   - 测试程序音频配置参数
+
+4. **高风险芯片不放行**：#11622（DFT MBIST/SCAN fail后恢复），建议二次QC验证或直接报废。DFT类fail恢复后仍存在间歇性故障风险。
+
+5. **复测通过芯片抽检**：从70+颗"R0 fail→R1 pass"芯片中，抽取DFT类和电源类fail芯片做QC R2验证，确认复测的稳定性。
+
+6. **封装/老化工艺排查**：#11531和#11655均为FT PASS→QC fail模式，建议排查封装工艺（键合、塑封）和老化应力是否引入损伤。
+
+---
+
+> 📊 **图表生成**：系统环境缺少matplotlib模块，未能生成可视化图表。建议在本地环境运行`generate_charts`工具生成：Fail项柱状图、良率饼图、良率趋势折线图。
+
+> 📝 **数据来源**：WQ7037AXB批次（260508），4个数据文件：FT_R0（215颗）、QC_R0（450颗）、QC_R1（82颗）、QC_R2（6颗）。FT和QC为同一批芯片的不同测试阶段，最终芯片数以QC为准（449颗）。
 ```
