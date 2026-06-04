@@ -3,6 +3,7 @@
 # 用法1:  bash run.sh                    （默认单次分析）
 # 用法2:  bash run.sh -i                 （交互模式）
 # 用法3:  bash run.sh "对比QC和FT数据"   （自定义分析请求）
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/.venv"
@@ -18,9 +19,11 @@ fi
 
 PYTHON="$VENV_DIR/bin/python3"
 
-# 加载环境变量
+# 加载环境变量（使用 source 而非 xargs，避免命令注入和空格问题）
 if [ -f "$SCRIPT_DIR/.env" ]; then
-    export $(grep -v '^#' "$SCRIPT_DIR/.env" | xargs)
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
 fi
 
 # 检查API Key
@@ -46,7 +49,8 @@ echo ""
 cd "$SCRIPT_DIR"
 
 # 根据参数决定模式
-if [ "$1" = "-i" ]; then
+ARG="${1:-}"
+if [ "$ARG" = "-i" ]; then
     # 交互模式
     exec < /dev/tty
     $PYTHON ate_agent.py --interactive
